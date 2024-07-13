@@ -3,5 +3,19 @@ name = "rust-chat-server"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "chat_app"
+path = "src/main.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
+
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+
+serde = { version = "1", features = ["derive"] }
+bytes = "1"
+bincode = "1"
+derive_more = "0.99"

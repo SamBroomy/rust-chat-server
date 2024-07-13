@@ -20,6 +20,14 @@ Will slowly remove the comments but for now, it's a good reference for understan
 
 Now implemented a chat server that will be able to handle multiple clients, and broadcast messages to all connected clients.
 
+## Branch 3 - Send & Receive Frames
+
+Its starting to get a bit messy but will clean things up later. Now what we have done is to send and receive frames. Essentially, deserializing some data (in this case an Enum) to bytes, sending the bytes from the client to the server and then serializing the bytes back to the original data.
+
+run the server with `cargo run --bin rust-chat-server`
+
+run the client `cargo run --bin client`
+
 ## References
 
 For the initial implementation, I followed the tutorial [Lily Mara -Creating a Chat Server with async Rust and Tokio](https://www.youtube.com/watch?v=T2mWg91sx-o).

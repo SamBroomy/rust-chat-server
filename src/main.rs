@@ -1,5 +1,13 @@
+mod connection;
+mod error;
+mod frame;
+
+use bytes::BytesMut;
+pub use error::{Error, Result};
+pub use frame::Frame;
+
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::TcpListener,
     sync::broadcast,
 };
@@ -8,6 +16,8 @@ use tokio::{
 async fn main() {
     // New tcp listener bound to localhost:8080
     let listener = TcpListener::bind("localhost:8080").await.unwrap();
+
+    println!("Listening on: {}", listener.local_addr().unwrap());
 
     let (tx, _rx) = broadcast::channel(10);
     // This accepts incoming connections.
@@ -22,9 +32,41 @@ async fn main() {
         // Spawn a new task to handle the connection. The issue here is that each connection is isolated and can't communicate with each other.
         tokio::spawn(async move {
             // Split the socket into a reader and a writer so that we can read and write to the socket concurrently.
-            let (reader, mut writer) = socket.split();
-            // Wrap the reader in a BufReader so that we can read line by line.
+            let (reader, writer) = socket.split();
+
             let mut reader = BufReader::new(reader);
+            let mut writer = BufWriter::new(writer);
+
+            println!("Split socket into reader and writer");
+
+            let welcome = "Welcome to the chat server!\n".to_string();
+
+            writer.write_all(welcome.as_bytes()).await.unwrap();
+            writer.flush().await.unwrap();
+            println!("Wrote welcome message");
+            //Its kinda silly the server requesting a username and then the client sending the username back to the server.
+            // But this is just a test to see if we can send and receive frames.
+            // This type of thing will be handled when starting the client and is information sent to the server on connection.
+            writer.write_all(b"Pick a username: ").await.unwrap();
+            writer.flush().await.unwrap();
+            println!("Wrote username prompt");
+
+            let mut buff = BytesMut::with_capacity(1024 * 4);
+
+            reader.read_buf(&mut buff).await.unwrap();
+
+            println!("{:?}", buff);
+
+            let frame = Frame::deserialize(&buff.freeze()).unwrap();
+
+            println!("{:?}", frame);
+
+            println!("Read FRAME!!!!");
+
+            return;
+
+            // Wrap the reader in a BufReader so that we can read line by line.
+            //let mut reader = BufReader::new(reader);
             // Store the line read from the socket.
             let mut line = String::new();
 
