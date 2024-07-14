@@ -1,48 +1,18 @@
-use chat_app::Frame;
-
-use bytes::BytesMut;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
+use chat_app::{Client, Result};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let socket = TcpStream::connect("localhost:8080").await?;
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        //.with_span_events(FmtSpan::CLOSE)
+        .with_max_level(tracing::Level::WARN)
+        .init();
+    println!("Enter your username:");
+    let mut username = String::new();
+    std::io::stdin().read_line(&mut username)?;
+    let username = username.trim();
+    let address = "localhost:8080";
 
-    let (reader, mut writer) = socket.into_split();
+    let client = Client::new(address, username).await?;
 
-    let mut reader = tokio::io::BufReader::new(reader);
-    let mut writer = tokio::io::BufWriter::new(writer);
-
-    let mut buf = BytesMut::with_capacity(1024 * 4);
-    let mut line = String::new();
-
-    reader.read_line(&mut line).await?;
-
-    println!("{:?}", line);
-
-    reader.read_buf(&mut buf).await?;
-
-    println!("{:?}", buf);
-
-    //Take user input
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-
-    let frame = Frame::Text {
-        sender: "Me".to_string(),
-        content: input.trim().to_string(),
-    };
-
-    let s = frame.serialize();
-
-    println!("{:?}", s);
-
-    writer.write_all(&s).await?;
-    writer.flush().await?;
-
-    println!("Wrote frame to server");
-
-    Ok(())
+    client.run().await
 }

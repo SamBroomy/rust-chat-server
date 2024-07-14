@@ -1,3 +1,5 @@
+use crate::Frame;
+
 pub type Result<T> = std::result::Result<T, Error>;
 //pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -5,6 +7,21 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[from]
     Io(std::io::Error),
+    ConnectionDropped,
+    DropConnectionFailed,
+    #[from]
+    Bincode(bincode::Error),
+    #[from]
+    BroadcastFailed(tokio::sync::broadcast::error::SendError<Frame>),
+    #[from]
+    BroadcastFailed1(tokio::sync::broadcast::error::SendError<(String, Frame)>),
+    #[from]
+    MpscSendFailed(tokio::sync::mpsc::error::SendError<Frame>),
+
+    InvalidHandshake,
+
+    //Remove
+    ImplementFrame,
 }
 
 //Error boilerplate

@@ -11,11 +11,26 @@ path = "src/main.rs"
 name = "client"
 path = "src/bin/client.rs"
 
+# Add examples here
+[[example]]
+name = "client"
+path = "src/example/client.rs"
+
+[[example]]
+name = "server"
+path = "src/example/server.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-
+async-std = "1"
+futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 bytes = "1"
 bincode = "1"
 derive_more = "0.99"
+rand = "0.8"
+async-trait = "0.1"
+
+tracing = "0.1"
+tracing-subscriber = "0.3"
+crossterm = "0.27"
