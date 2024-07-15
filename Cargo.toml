@@ -11,14 +11,6 @@ path = "src/main.rs"
 name = "client"
 path = "src/bin/client.rs"
 
-# Add examples here
-[[example]]
-name = "client"
-path = "src/example/client.rs"
-
-[[example]]
-name = "server"
-path = "src/example/server.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

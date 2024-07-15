@@ -2,15 +2,52 @@
 use crate::{Error, Result};
 
 use async_trait::async_trait;
-use bincode;
 use bytes::{Bytes, BytesMut};
+use crossterm::style::Stylize;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display, Formatter};
+
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, error, instrument};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub struct User {
+    username: String,
+    id: u32,
+}
+
+impl User {
+    pub fn new(username: String) -> Self {
+        Self {
+            username,
+            id: rand::random(),
+        }
+    }
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+}
+
+impl Display for User {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({})", self.username, self.id)
+    }
+}
+
+impl From<String> for User {
+    fn from(username: String) -> Self {
+        Self::new(username)
+    }
+}
+
+impl From<&str> for User {
+    fn from(username: &str) -> Self {
+        Self::new(username.to_string())
+    }
+}
+
 #[async_trait]
-pub trait FrameType: Serialize + for<'a> Deserialize<'a> + Debug {
+pub trait FrameType: Serialize + for<'a> Deserialize<'a> + Debug + Send + Sync + Display {
     #[instrument(skip(self), level = "trace", ret, err)]
     fn serialize_frame(&self) -> Result<Bytes> {
         Ok(bincode::serialize(self)?.into())
@@ -45,31 +82,12 @@ pub trait FrameType: Serialize + for<'a> Deserialize<'a> + Debug {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Frame {
-    // Server communication frames
-    Handshake {
-        username: String,
-    },
-    ServerMessage {
-        content: String,
-    },
-
-    // Chat message frame
+pub enum ClientFrame {
+    Handshake(User),
     ChatMessage {
-        username: String,
         content: String,
     },
-
-    // Error frame
-    Error {
-        message: String,
-    },
-
-    // Ping frame
     Ping(u64),
-    Pong(u64),
-
-    // Server-related commands
     Join {
         room: String,
     },
@@ -81,43 +99,50 @@ pub enum Frame {
     ListRooms,
     ListUsers,
     Help,
-
-    // // Chat-related messages
-    // ChatMessage {
-    //     room: String,
-    //     content: String,
-    // },
-
-    // Server responses
-    ServerResponse {
-        content: String,
-    },
-    RoomList {
-        rooms: Vec<String>,
-    },
-    UserList {
-        users: Vec<String>,
-    },
-
-    // Connection-related
-    Connect {
-        username: String,
-    },
     Disconnect,
 }
 
-impl FrameType for Frame {}
+impl FrameType for ClientFrame {}
 
-impl ToString for Frame {
-    fn to_string(&self) -> String {
+impl Display for ClientFrame {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Frame::Handshake { username } => format!("{} connected", username),
-            Frame::ServerMessage { content } => content.clone(),
-            Frame::ChatMessage { username, content } => format!("{}: {}", username, content),
-            Frame::Error { message } => format!("Error: {}", message),
-            Frame::Ping(i) => format!("Ping: {:}", i),
-            Frame::Pong(i) => format!("Pong: {:}", i),
+            ClientFrame::Handshake(user) => write!(f, "User {} connected", user),
+            ClientFrame::ChatMessage { content } => write!(f, "{}", content),
+            ClientFrame::Ping(i) => write!(f, "Ping: {:}", i),
+            ClientFrame::Join { room } => write!(f, "Joining room: {}", room),
             _ => todo!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServerFrame {
+    ServerMessage { content: String },
+    ChatMessage { user: User, content: String },
+    Error { message: String },
+    Pong(u64),
+    RoomList { rooms: Vec<String> },
+    UserList { users: Vec<String> },
+}
+
+impl FrameType for ServerFrame {}
+
+impl Display for ServerFrame {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ServerFrame::ServerMessage { content } => write!(f, "Server: {}", content),
+            ServerFrame::ChatMessage { user, content } => {
+                write!(f, "{:<10}: {}", user.username().yellow(), content)
+            }
+            ServerFrame::Error { message } => write!(f, "Error: {}", message),
+            ServerFrame::Pong(i) => write!(f, "Pong: {:}", i),
+            ServerFrame::RoomList { rooms } => {
+                write!(f, "Rooms: {}", rooms.join(", "))
+            }
+            ServerFrame::UserList { users } => {
+                write!(f, "Users: {}", users.join(", "))
+            }
         }
     }
 }

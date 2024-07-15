@@ -1,4 +1,4 @@
-use crate::Frame;
+use crate::{ServerFrame, User};
 
 pub type Result<T> = std::result::Result<T, Error>;
 //pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -12,22 +12,19 @@ pub enum Error {
     #[from]
     Bincode(bincode::Error),
     #[from]
-    BroadcastFailed(tokio::sync::broadcast::error::SendError<Frame>),
-    #[from]
-    BroadcastFailed1(tokio::sync::broadcast::error::SendError<(String, Frame)>),
-    #[from]
-    MpscSendFailed(tokio::sync::mpsc::error::SendError<Frame>),
+    BroadcastFailed(tokio::sync::broadcast::error::SendError<(User, ServerFrame)>),
 
     InvalidHandshake,
 
     //Remove
     ImplementFrame,
+    InvalidCommand,
 }
 
 //Error boilerplate
 impl core::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(fmt, "{}", self)
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
