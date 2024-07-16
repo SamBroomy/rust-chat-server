@@ -9,6 +9,7 @@ pub enum ConnectionError {
     #[from]
     Io(std::io::Error),
 
+    UnableToConnectToServer(std::io::Error),
     ConnectionDropped,
     InvalidFrameSize,
 }

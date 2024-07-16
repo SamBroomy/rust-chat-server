@@ -7,61 +7,54 @@ pub use frame::FrameType;
 
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, ToSocketAddrs};
+use tracing::info;
 
-pub type Reader = BufReader<OwnedReadHalf>;
-pub type Writer = BufWriter<OwnedWriteHalf>;
-
+pub type Reader<'a> = BufReader<ReadHalf<'a>>;
+pub type Writer<'a> = BufWriter<WriteHalf<'a>>;
+pub type OwnedReader = BufReader<OwnedReadHalf>;
+pub type OwnedWriter = BufWriter<OwnedWriteHalf>;
 #[derive(Debug)]
 pub struct Connection {
-    reader: Reader,
-    writer: Writer,
+    stream: TcpStream,
 }
 
 impl Connection {
-    pub fn new(stream: TcpStream) -> Self {
-        let (reader, writer) = stream.into_split();
-        Self {
-            reader: BufReader::new(reader),
-            writer: BufWriter::new(writer),
-        }
+    pub async fn init(addr: impl ToSocketAddrs) -> Result<Self> {
+        let stream = TcpStream::connect(addr)
+            .await
+            .map_err(ConnectionError::UnableToConnectToServer)?;
+        info!("Connected to server {}", stream.peer_addr()?);
+
+        Ok(Self { stream })
     }
 
-    pub fn from_parts(reader: OwnedReadHalf, writer: OwnedWriteHalf) -> Self {
-        Self {
-            reader: BufReader::new(reader),
-            writer: BufWriter::new(writer),
-        }
+    pub fn from_stream(stream: TcpStream) -> Self {
+        Self { stream }
     }
 
     /// Convenience method to read a frame from the stream
     pub async fn read_frame<F: FrameType>(&mut self) -> Result<F> {
-        F::read_frame_from(&mut self.reader).await
+        F::read_frame_from(&mut self.stream.split().0).await
     }
 
     /// Convenience method to write a frame to the stream
     pub async fn write_frame<F: FrameType>(&mut self, frame: &F) -> Result<()> {
-        frame.write_frame_to(&mut self.writer).await
+        frame.write_frame_to(&mut self.stream.split().1).await
     }
 
-    pub fn get_writer(&mut self) -> &mut Writer {
-        &mut self.writer
-    }
+    pub fn split_into(self) -> (OwnedReader, OwnedWriter) {
+        let (reader, writer) = self.stream.into_split();
 
-    pub fn get_reader(&mut self) -> &mut Reader {
-        &mut self.reader
-    }
-
-    pub fn split_into(self) -> (Reader, Writer) {
-        (self.reader, self.writer)
-    }
-
-    pub fn split(stream: &mut TcpStream) -> (BufReader<ReadHalf>, BufWriter<WriteHalf>) {
-        let (reader, writer) = stream.split();
         (BufReader::new(reader), BufWriter::new(writer))
     }
 
-    pub fn split_owned(stream: TcpStream) -> (Reader, Writer) {
+    pub fn split(&mut self) -> (Reader<'_>, Writer<'_>) {
+        let (reader, writer) = self.stream.split();
+        (BufReader::new(reader), BufWriter::new(writer))
+    }
+
+    pub fn split_owned(stream: TcpStream) -> (OwnedReader, OwnedWriter) {
         let (reader, writer) = stream.into_split();
         (BufReader::new(reader), BufWriter::new(writer))
     }

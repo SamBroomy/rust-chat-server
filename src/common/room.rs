@@ -4,14 +4,12 @@ use crate::{ServerMessage, User};
 use bincode::{Decode, Encode};
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::hash::Hash;
 use tokio::sync::broadcast;
 use tracing::error;
 
-#[derive(Debug, Clone, Encode, Decode, Eq, PartialEq)]
+#[derive(Debug, Clone, Encode, Decode, Eq, PartialEq, Hash)]
 pub struct Room {
     name: String,
-    description: Option<String>,
 }
 
 impl Display for Room {
@@ -22,10 +20,7 @@ impl Display for Room {
 
 impl From<String> for Room {
     fn from(name: String) -> Self {
-        Self {
-            name,
-            description: None,
-        }
+        Self { name }
     }
 }
 
@@ -33,14 +28,7 @@ impl From<&str> for Room {
     fn from(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            description: None,
         }
-    }
-}
-
-impl Hash for Room {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
     }
 }
 
@@ -114,12 +102,7 @@ impl RoomManager {
 
     pub fn leave_room(&mut self, room: &Room, user: &User) -> Result<()> {
         if let Some(tx) = self.rooms.get(room) {
-            if let Err(e) = tx.send((
-                user.clone(),
-                ServerMessage::RoomLeft {
-                    room: room.clone().name,
-                },
-            )) {
+            if let Err(e) = tx.send((user.clone(), ServerMessage::RoomLeft(room.clone()))) {
                 error!("Failed to send room left message: {}", e);
             }
             Ok(())

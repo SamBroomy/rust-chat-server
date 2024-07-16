@@ -7,7 +7,7 @@ mod server;
 
 pub use client::Client;
 pub use common::{ClientMessage, Room, RoomManager, ServerMessage, User};
-pub use connection::{Connection, FrameType, Reader, Writer};
+pub use connection::{Connection, FrameType};
 pub use error::{Error, Result};
 pub use server::Server;
 use tracing::{level_filters::LevelFilter, warn};

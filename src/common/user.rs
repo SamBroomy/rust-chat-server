@@ -4,6 +4,8 @@ use std::{
     hash::Hash,
 };
 
+use crate::ClientMessage;
+
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Hash, Eq)]
 pub struct User {
     username: String,
@@ -15,6 +17,10 @@ impl User {
     }
     pub fn username(&self) -> &str {
         &self.username
+    }
+
+    pub fn handshake_message(&self) -> ClientMessage {
+        ClientMessage::Handshake(self.clone())
     }
 }
 

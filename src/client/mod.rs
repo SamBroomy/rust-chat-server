@@ -1,6 +1,6 @@
 mod error;
 
-use crate::connection::ConnectionError;
+use crate::connection::{ConnectionError, OwnedReader, OwnedWriter};
 use crate::{ClientMessage, Connection, FrameType, ServerMessage, User};
 pub use error::ClientError;
 use error::Result;
@@ -11,118 +11,118 @@ use crossterm::style::Stylize;
 use crossterm::terminal::{Clear, ClearType};
 use std::process::exit;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::net::{TcpStream, ToSocketAddrs};
+use tokio::net::ToSocketAddrs;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 pub struct Client {
-    connection: Option<Connection>,
     user: User,
 }
 
 impl Client {
-    pub async fn new(addr: impl ToSocketAddrs, user: impl Into<User>) -> Result<Self> {
-        let mut stream = TcpStream::connect(addr).await?;
-        info!("Connected to server {}", stream.peer_addr()?);
-
-        let user = user.into();
-
-        let (_, mut writer) = Connection::split(&mut stream);
-
-        info!("Sending handshake frame");
-        ClientMessage::Handshake(user.clone())
-            .write_frame_to(&mut writer)
-            .await?;
-        info!("Handshake sent");
-
-        Ok(Self {
-            connection: Some(Connection::new(stream)),
-            user,
-        })
+    pub async fn new(user: impl Into<User>) -> Self {
+        Self { user: user.into() }
     }
 
-    pub async fn run(self) -> Result<()> {
-        let (input_sender, mut input_receiver) = mpsc::channel(16);
+    async fn authenticate(&self, connection: &mut Connection) -> Result<()> {
+        connection
+            .write_frame(&ClientMessage::handshake(self.user.clone()))
+            .await?;
+        Ok(())
+    }
 
-        let user = self.user.clone();
-
-        tokio::spawn(async move {
-            let reader = BufReader::new(tokio::io::stdin());
-            let mut lines = reader.lines();
-            let _user = user.clone();
-            while let Ok(line) = lines.next_line().await {
-                match line {
-                    Some(line) => {
-                        execute!(
-                            std::io::stdout(),
-                            MoveUp(1),
-                            MoveToColumn(0),
-                            Clear(ClearType::CurrentLine)
-                        )
-                        .unwrap();
-                        let line = line.trim();
-
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let frame = match parse_user_input(line) {
-                            Some(frame) => frame,
-                            None => continue,
-                        };
-                        if let Err(e) = input_sender.send(frame).await {
-                            error!("Failed to send frame: {:?}", e);
-                            break;
-                        }
+    async fn handle_user_input(input_sender: mpsc::Sender<ClientMessage>) {
+        let reader = BufReader::new(tokio::io::stdin());
+        let mut lines = reader.lines();
+        while let Ok(line) = lines.next_line().await {
+            match line {
+                Some(line) => {
+                    execute!(
+                        std::io::stdout(),
+                        MoveUp(1),
+                        MoveToColumn(0),
+                        Clear(ClearType::CurrentLine)
+                    )
+                    .unwrap();
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
                     }
-                    None => {
-                        error!("Failed to read line");
+                    let frame = match parse_user_input(line) {
+                        Some(frame) => frame,
+                        None => continue,
+                    };
+                    if let Err(e) = input_sender.send(frame).await {
+                        error!("Failed to send frame: {:?}", e);
                         break;
                     }
                 }
+                None => {
+                    error!("Failed to read line");
+                    break;
+                }
             }
+        }
+    }
+
+    async fn process_frame(
+        frame: ClientMessage,
+        reader: &mut OwnedReader,
+        writer: &mut OwnedWriter,
+    ) -> Result<()> {
+        match frame {
+            ClientMessage::Ping(nonce) => {
+                info!("Sending ping frame");
+                frame.write_frame_to(writer).await?;
+                let server_frame = ServerMessage::read_frame_from(reader).await?;
+
+                let n = match server_frame {
+                    ServerMessage::Pong(n) => {
+                        println!("{}", server_frame.to_string().yellow());
+                        info!("Received pong frame: {}", n);
+                        n
+                    }
+                    _ => {
+                        error!("Received invalid frame: {:?}", server_frame);
+                        return Ok(());
+                    }
+                };
+
+                assert_eq!(nonce, n);
+                println!("{}", "Ping-pong successful".green());
+            }
+            ClientMessage::Disconnect => {
+                info!("Sending disconnect frame");
+                frame.write_frame_to(writer).await?;
+                return Err(ConnectionError::ConnectionDropped.into());
+            }
+            _ => todo!(),
+        }
+        Ok(())
+    }
+
+    // if frame.write_frame_to(&mut writer).await.is_err() {
+    //     eprintln!("Failed to send frame");
+    //     break;
+    // }
+
+    pub async fn run(self, addr: impl ToSocketAddrs) -> Result<()> {
+        let mut connection = Connection::init(addr).await?;
+
+        self.authenticate(&mut connection).await?;
+
+        let (input_sender, mut input_receiver) = mpsc::channel(16);
+
+        tokio::spawn(async move {
+            Self::handle_user_input(input_sender).await;
         });
-
-        let connection = match self.connection {
-            Some(connection) => connection,
-            None => return Err(ConnectionError::ConnectionDropped.into()),
-        };
-
         let (mut reader, mut writer) = connection.split_into();
 
         loop {
             tokio::select! {
                 Some(frame) = input_receiver.recv() =>{
-                    if let ClientMessage::Ping(nonce) = frame {
-                        info!("Sending ping frame");
-                        frame.write_frame_to(&mut writer).await?;
-                        let server_frame = ServerMessage::read_frame_from(&mut reader).await?;
-
-                        let n = match server_frame {
-                            ServerMessage::Pong(n) => {
-                                println!("{}", server_frame.to_string().yellow());
-                                info!("Received pong frame: {}", n);
-                                n
-                            }
-                            _ => {
-                                error!("Received invalid frame: {:?}", server_frame);
-                                continue;
-                            }
-                        };
-
-                        assert_eq!(nonce, n);
-                        println!("{}", "Ping-pong successful".green());
-
-                        continue;
-                    }
-
-
-                    if frame.write_frame_to(&mut writer).await.is_err() {
-                        eprintln!("Failed to send frame");
-                        break;
-                    }
-
+                    Self::process_frame(frame, &mut reader, &mut writer).await?;
                 }
-                // Log messages to the console here.
                 frame = ServerMessage::read_frame_from(&mut reader) => {
                     match frame {
                         Ok(frame) => {
@@ -138,11 +138,8 @@ impl Client {
                                     break;
                                 }
                             }
-
                         }
-
                     }
-
                 }
                 else => {
                     error!("Connection dropped");
@@ -191,7 +188,7 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
         }
     } else {
         info!("Sending chat message frame");
-        Some(ClientMessage::ChatMessage { content: line })
+        Some(ClientMessage::ChatMessage(line))
     }
 }
 

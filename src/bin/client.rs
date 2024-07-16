@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     let address = init(Level::DEBUG);
     let username = get_username()?;
 
-    let client = Client::new(address, username).await?;
+    let client = Client::new(username).await;
 
-    Ok(client.run().await?)
+    Ok(client.run(address).await?)
 }

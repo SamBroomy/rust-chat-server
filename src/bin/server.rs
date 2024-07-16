@@ -6,7 +6,7 @@ use tracing::Level;
 async fn main() -> Result<()> {
     let addr = init(Level::TRACE);
 
-    let mut server = Server::new(addr).await?;
+    let mut server = Server::default();
 
-    Ok(server.run().await?)
+    Ok(server.run(addr).await?)
 }
