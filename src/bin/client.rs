@@ -1,18 +1,25 @@
-use chat_app::{Client, Result};
+use chat_app::{init, Client, Result};
+use tracing::Level;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        //.with_span_events(FmtSpan::CLOSE)
-        .with_max_level(tracing::Level::WARN)
-        .init();
+fn get_username() -> Result<String> {
     println!("Enter your username:");
     let mut username = String::new();
     std::io::stdin().read_line(&mut username)?;
     let username = username.trim();
-    let address = "localhost:8080";
+    if username.is_empty() {
+        println!("Username cannot be empty, please try again");
+        get_username()
+    } else {
+        Ok(username.trim().to_string())
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let address = init(Level::DEBUG);
+    let username = get_username()?;
 
     let client = Client::new(address, username).await?;
 
-    client.run().await
+    Ok(client.run().await?)
 }

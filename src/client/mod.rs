@@ -1,4 +1,10 @@
-use crate::{ClientFrame, Connection, Error, FrameType, Result, ServerFrame, User};
+mod error;
+
+use crate::connection::ConnectionError;
+use crate::{ClientMessage, Connection, FrameType, ServerMessage, User};
+pub use error::ClientError;
+use error::Result;
+
 use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::execute;
 use crossterm::style::Stylize;
@@ -24,8 +30,8 @@ impl Client {
         let (_, mut writer) = Connection::split(&mut stream);
 
         info!("Sending handshake frame");
-        ClientFrame::Handshake(user.clone())
-            .write_to(&mut writer)
+        ClientMessage::Handshake(user.clone())
+            .write_frame_to(&mut writer)
             .await?;
         info!("Handshake sent");
 
@@ -43,7 +49,7 @@ impl Client {
         tokio::spawn(async move {
             let reader = BufReader::new(tokio::io::stdin());
             let mut lines = reader.lines();
-            let user = user.clone();
+            let _user = user.clone();
             while let Ok(line) = lines.next_line().await {
                 match line {
                     Some(line) => {
@@ -54,11 +60,12 @@ impl Client {
                             Clear(ClearType::CurrentLine)
                         )
                         .unwrap();
+                        let line = line.trim();
 
-                        if line.trim().is_empty() {
+                        if line.is_empty() {
                             continue;
                         }
-                        let frame = match parse_user_input(&line) {
+                        let frame = match parse_user_input(line) {
                             Some(frame) => frame,
                             None => continue,
                         };
@@ -77,7 +84,7 @@ impl Client {
 
         let connection = match self.connection {
             Some(connection) => connection,
-            None => return Err(Error::ConnectionDropped),
+            None => return Err(ConnectionError::ConnectionDropped.into()),
         };
 
         let (mut reader, mut writer) = connection.split_into();
@@ -85,13 +92,13 @@ impl Client {
         loop {
             tokio::select! {
                 Some(frame) = input_receiver.recv() =>{
-                    if let ClientFrame::Ping(nonce) = frame {
+                    if let ClientMessage::Ping(nonce) = frame {
                         info!("Sending ping frame");
-                        frame.write_to(&mut writer).await?;
-                        let server_frame = ServerFrame::read_from(&mut reader).await?;
+                        frame.write_frame_to(&mut writer).await?;
+                        let server_frame = ServerMessage::read_frame_from(&mut reader).await?;
 
                         let n = match server_frame {
-                            ServerFrame::Pong(n) => {
+                            ServerMessage::Pong(n) => {
                                 println!("{}", server_frame.to_string().yellow());
                                 info!("Received pong frame: {}", n);
                                 n
@@ -109,21 +116,21 @@ impl Client {
                     }
 
 
-                    if frame.write_to(&mut writer).await.is_err() {
+                    if frame.write_frame_to(&mut writer).await.is_err() {
                         eprintln!("Failed to send frame");
                         break;
                     }
 
                 }
                 // Log messages to the console here.
-                frame = ServerFrame::read_from(&mut reader) => {
+                frame = ServerMessage::read_frame_from(&mut reader) => {
                     match frame {
                         Ok(frame) => {
                             handle_and_print_frame(frame)?
                         }
                         Err(e) => {
                             match e {
-                                Error::ConnectionDropped => {
+                                ConnectionError::ConnectionDropped => {
                                     exit(0);
                                 }
                                 _ => {
@@ -148,26 +155,33 @@ impl Client {
     }
 }
 
-fn parse_user_input(input: impl Into<String>) -> Option<ClientFrame> {
-    let line = input.into();
+fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
+    let line: String = input.into();
     println!("{:<10}: {}", "You".blue(), line);
 
     if line.starts_with(':') {
-        match line.as_str() {
-            ":" => {
-                warn!("Empty command.");
-                println!("List of valid commands: <:quit>, <:ping>");
-                None
-            }
+        match line.split(' ').next().unwrap().to_lowercase().as_str() {
             ":quit" => {
                 info!("Sending quit frame");
-                Some(ClientFrame::Disconnect)
+                Some(ClientMessage::Disconnect)
             }
             ":ping" => {
                 info!("Sending ping frame");
-                let frame = ClientFrame::Ping(rand::random());
+                let frame = ClientMessage::Ping(rand::random());
                 println!("{}", frame.to_string().blue());
                 Some(frame)
+            }
+            ":pm" => {
+                let mut parts = line.splitn(3, ' ');
+                parts.next();
+                let user = parts.next().unwrap_or_default();
+                info!("Sending private message to {}", user);
+                let content = parts.next().unwrap_or_default();
+                info!("Message: {}", content);
+                Some(ClientMessage::PrivateMessage {
+                    to_user: user.into(),
+                    content: content.to_string(),
+                })
             }
             _ => {
                 warn!("Invalid command: {}.", line);
@@ -177,7 +191,7 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientFrame> {
         }
     } else {
         info!("Sending chat message frame");
-        Some(ClientFrame::ChatMessage { content: line })
+        Some(ClientMessage::ChatMessage { content: line })
     }
 }
 
@@ -187,13 +201,13 @@ enum Commands {
 }
 
 impl TryFrom<&str> for Commands {
-    type Error = Error;
+    type Error = ClientError;
 
     fn try_from(value: &str) -> Result<Self> {
         match value {
             ":quit" => Ok(Self::Quit),
             ":ping" => Ok(Self::Ping),
-            _ => Err(Error::InvalidCommand),
+            _ => Err(ClientError::InvalidCommand),
         }
     }
 }
