@@ -2,13 +2,15 @@
 
 Understanding async rust better by implementing a chat-server from scratch
 
+## Will update soon!!!
+
 ## How to run
 
 Run each of the following commands in a separate terminal window.
 
-`cargo run` - Run the server
+`cargo run` or `just run` - Run the server
 
-`telnet localhost 8080` - Connect to the server (run this command several times in different terminal windows to simulate multiple clients)
+`just client` - Connect to the server (run this command several times in different terminal windows to simulate multiple clients)
 
 ## Branch 1 - Echo server
 
