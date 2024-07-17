@@ -1,6 +1,6 @@
 # rust-chat-server
 
-Understanding async rust better by implementing a chat-server from scratch
+Understanding rust, tokio, threads, channels & async better by implementing a chat-server from scratch.
 
 ## Current features
 
