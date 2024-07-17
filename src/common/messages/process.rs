@@ -13,9 +13,14 @@ pub enum ProcessMessage {
         from_user: UserName,
         message: ServerMessage,
     },
+    Internal(ProcessInternal),
+}
+
+#[derive(Debug, Clone)]
+pub enum ProcessInternal {
     NewUser(UserName, mpsc::Sender<ProcessMessage>),
     Response(ProcessResponse),
-    Complete,
+    JoinRoom(UserName),
 }
 
 #[derive(Debug, Clone)]

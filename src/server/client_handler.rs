@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     common::ProcessResponse, server::ServerError, ClientMessage, Connection, FrameType,
-    ProcessMessage, ServerMessage, UserName,
+    ProcessInternal, ProcessMessage, ServerMessage, UserName,
 };
 
 /// Handles the client connection, reading and writing messages to the stream.
@@ -69,7 +69,10 @@ impl ClientHandler {
         debug!("Add user to server");
         // Send the user to the server processor
         server_command_tx
-            .send(ProcessMessage::NewUser(user.clone(), client_tx))
+            .send(ProcessMessage::Internal(ProcessInternal::NewUser(
+                user.clone(),
+                client_tx,
+            )))
             .await?;
 
         tokio::select! {
@@ -80,14 +83,12 @@ impl ClientHandler {
             }
             Some(process_message) = client_rx.recv() => {
                 match process_message {
-                    ProcessMessage::Response(ProcessResponse::Complete) => {
+                    ProcessMessage::Internal(ProcessInternal::Response(ProcessResponse::Complete)) => {
                         debug!("User added to server");
                     }
                     _ => return Err(ServerError::InvalidHandshake),
                 }
             }
-
-
         }
 
         // Send back a response to the client
@@ -124,45 +125,6 @@ impl ClientHandler {
                     message: frame,
                 };
                 self.server_command_tx.send(message).await?;
-
-                /*
-                            server_command_tx.send((current_user.clone(), frame.clone())).await?;
-                            match frame {
-
-                                ClientMessage::ChatMessage (content )=> {
-                                    Self::handle_chat_message(&current_user, content, &server_broadcast_tx)?;
-                                }
-                                ClientMessage::RoomMessage { room, content } => {
-                                    Self::handle_room_message(&current_user, room, content, &rooms).await?;
-                                }
-                                ClientMessage::Ping(nonce) => {
-                                    Self::handle_ping(&current_user, nonce, &mut writer).await?;
-                                }
-                                ClientMessage::Disconnect => {
-                                    Self::handle_disconnect_request(&current_user, &clients, &server_broadcast_tx).await?;
-                                    break;
-                                },
-                                ClientMessage::ListRooms => {
-                                    Self::handle_list_rooms(&current_user, &rooms, &mut writer).await?;
-                                }
-                                ClientMessage::ListUsers => {
-                                    Self::handle_list_users(&current_user, &clients, &mut writer).await?;
-                                }
-                                ClientMessage::Join (room) => {
-                                    Self::join_room(&current_user, room, &rooms, &server_command_tx).await?;
-                                }
-                                ClientMessage::Handshake(_) => return Err(ServerError::InvalidHandshake),
-                                ClientMessage::CreateRoom (room) => {
-                                    Self::handle_create_room(&current_user, room,  &rooms, &server_command_tx).await?;
-                                }
-                                ClientMessage::Leave => {
-                                    todo!()
-                                }
-                                ClientMessage::PrivateMessage { to_user, content } => {
-                                    Self::handle_private_message(to_user, current_user.clone(), content, &clients, &mut writer).await?;
-                                }
-                                */
-
             }
 
             Ok((send_user ,message)) = server_broadcast_rx.recv() => {
@@ -174,7 +136,7 @@ impl ClientHandler {
 
             Some(message) = self.client_rx.recv() => {
                 match message {
-                ProcessMessage::ClientMessage { from_user, message } => {
+                ProcessMessage::ServerMessage { from_user, message } => {
                     if self.user == from_user {
                         debug!("Message from self");
                     }
@@ -182,7 +144,7 @@ impl ClientHandler {
                     message.write_frame_to(&mut writer).await?;
                 }
                 _ => {
-                    warn!("Received message from client_rx that is not a ClientMessage");
+                    warn!("Received message from client_rx that is not a ServerMessage");
                     break;
                 }
             }}}

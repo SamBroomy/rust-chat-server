@@ -190,11 +190,11 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
                     content: content.to_string(),
                 })
             }
-            ":list-rooms" => {
+            ":rooms" => {
                 info!("Requesting list of rooms");
                 Some(ClientMessage::ListRooms)
             }
-            ":list-users" => {
+            ":users" => {
                 info!("Requesting list of users");
                 Some(ClientMessage::ListUsers)
             }
