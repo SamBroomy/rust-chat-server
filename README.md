@@ -2,7 +2,17 @@
 
 Understanding async rust better by implementing a chat-server from scratch
 
-## Will update soon!!!
+## Current features
+
+- Global Server chat
+- Chat rooms (soon)
+- 'Private'/Direct Messaging
+- Global Notifications
+- 'lose' authentication (want to intergrate some form of encryption, maybe even encrypted messages). 
+
+Todo: Move the request processing to the server thread rather than (how it currently is implemented) by the connection handler.
+
+## Will update the below soon!!!
 
 ## How to run
 
