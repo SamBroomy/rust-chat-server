@@ -5,7 +5,7 @@ pub use error::ConnectionError;
 use error::Result;
 pub use frame::FrameType;
 
-use tokio::io::{BufReader, BufWriter};
+use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tracing::info;
@@ -57,5 +57,9 @@ impl Connection {
     pub fn split_owned(stream: TcpStream) -> (OwnedReader, OwnedWriter) {
         let (reader, writer) = stream.into_split();
         (BufReader::new(reader), BufWriter::new(writer))
+    }
+
+    pub async fn close(&mut self) {
+        let _ = self.stream.shutdown().await;
     }
 }

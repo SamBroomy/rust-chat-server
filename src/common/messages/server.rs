@@ -1,4 +1,4 @@
-use crate::{FrameType, Room, User};
+use crate::{FrameType, RoomName, UserName};
 use bincode::{Decode, Encode};
 use crossterm::style::Stylize;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -6,16 +6,34 @@ use std::fmt::{self, Debug, Display, Formatter};
 #[derive(Debug, Clone, Decode, Encode)]
 pub enum ServerMessage {
     ServerMessage(String),
-    ChatMessage { from: User, content: String },
-    PrivateMessage { from: User, content: String },
+    ChatMessage {
+        from: UserName,
+        content: String,
+    },
+    RoomMessage {
+        room: RoomName,
+        from: UserName,
+        content: String,
+    },
+    PrivateMessage {
+        from: UserName,
+        content: String,
+    },
     Error(String),
     Pong(u16),
-    RoomList { rooms: Vec<Room> },
-    UserList { users: Vec<User> },
-    RoomJoined { room: Room, user: User },
-    RoomCreated(Room),
-    RoomLeft(Room),
-    UserJoined(User),
+    RoomList {
+        rooms: Vec<RoomName>,
+    },
+    UserList {
+        users: Vec<UserName>,
+    },
+    RoomJoined {
+        room: RoomName,
+        user: UserName,
+    },
+    RoomCreated(RoomName),
+    RoomLeft(RoomName),
+    UserJoined(UserName),
 }
 
 // Builder methods
@@ -25,14 +43,14 @@ impl ServerMessage {
         Self::ServerMessage(content.into())
     }
 
-    pub fn chat_message(from: impl Into<User>, content: impl Into<String>) -> Self {
+    pub fn chat_message(from: impl Into<UserName>, content: impl Into<String>) -> Self {
         Self::ChatMessage {
             from: from.into(),
             content: content.into(),
         }
     }
 
-    pub fn private_message(from: impl Into<User>, content: impl Into<String>) -> Self {
+    pub fn private_message(from: impl Into<UserName>, content: impl Into<String>) -> Self {
         Self::PrivateMessage {
             from: from.into(),
             content: content.into(),
@@ -47,15 +65,15 @@ impl ServerMessage {
         Self::Pong(i)
     }
 
-    pub fn room_list(rooms: Vec<Room>) -> Self {
+    pub fn room_list(rooms: Vec<RoomName>) -> Self {
         Self::RoomList { rooms }
     }
 
-    pub fn user_list(users: Vec<User>) -> Self {
+    pub fn user_list(users: Vec<UserName>) -> Self {
         Self::UserList { users }
     }
 
-    pub fn room_joined(room: impl Into<Room>, user: impl Into<User>) -> Self {
+    pub fn room_joined(room: impl Into<RoomName>, user: impl Into<UserName>) -> Self {
         Self::RoomJoined {
             room: room.into(),
             user: user.into(),
@@ -79,6 +97,19 @@ impl Display for ServerMessage {
             ServerMessage::ChatMessage { from, content } => {
                 write!(f, "{:<10}: {}", from.username().yellow(), content)
             }
+            ServerMessage::RoomMessage {
+                room,
+                from,
+                content,
+            } => {
+                write!(
+                    f,
+                    "{} {:<10}: {}",
+                    format!("[{}]", room).to_string().cyan(),
+                    from.to_string().yellow(),
+                    content
+                )
+            }
             ServerMessage::PrivateMessage { from, content } => {
                 write!(
                     f,
@@ -98,35 +129,27 @@ impl Display for ServerMessage {
             }
             ServerMessage::Pong(i) => write!(f, "{}", format!("Pong: {:}", i).yellow()),
             ServerMessage::RoomList { rooms } => {
-                write!(
-                    f,
-                    "{}, {}",
-                    "[Rooms]".on_cyan(),
-                    rooms
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                let rooms = rooms.iter().map(ToString::to_string).collect::<Vec<_>>();
+                if rooms.is_empty() {
+                    write!(f, "{}", "[No Rooms created]".cyan())
+                } else {
+                    write!(f, "{}, {}", "[Rooms]".cyan(), rooms.join(", ").cyan())
+                }
             }
             ServerMessage::UserList { users } => {
-                write!(
-                    f,
-                    "{} {}",
-                    "[Users]".on_yellow(),
-                    users
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                let users = users.iter().map(ToString::to_string).collect::<Vec<_>>();
+                if users.is_empty() {
+                    write!(f, "{}", "[No Users]".yellow())
+                } else {
+                    write!(f, "{} {}", "[Users]".yellow(), users.join(", "))
+                }
             }
             ServerMessage::RoomJoined { room, user } => {
                 write!(
                     f,
                     "User {} joined room: {}",
-                    user.to_string().on_yellow(),
-                    room.to_string().on_cyan()
+                    user.to_string().yellow(),
+                    room.to_string().cyan()
                 )
             }
             ServerMessage::RoomCreated(room) => {
@@ -141,7 +164,7 @@ impl Display for ServerMessage {
 }
 
 impl ServerMessage {
-    pub fn get_user(&self) -> Option<User> {
+    pub fn get_user(&self) -> Option<UserName> {
         match self {
             ServerMessage::ChatMessage { from, .. } => Some(from.clone()),
             ServerMessage::PrivateMessage { from, .. } => Some(from.clone()),

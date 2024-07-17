@@ -1,7 +1,7 @@
 mod error;
 
 use crate::connection::{ConnectionError, OwnedReader, OwnedWriter};
-use crate::{ClientMessage, Connection, FrameType, ServerMessage, User};
+use crate::{ClientMessage, Connection, FrameType, ServerMessage, UserName};
 pub use error::ClientError;
 use error::Result;
 
@@ -16,11 +16,11 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 pub struct Client {
-    user: User,
+    user: UserName,
 }
 
 impl Client {
-    pub async fn new(user: impl Into<User>) -> Self {
+    pub async fn new(user: impl Into<UserName>) -> Self {
         Self { user: user.into() }
     }
 
@@ -96,7 +96,9 @@ impl Client {
                 frame.write_frame_to(writer).await?;
                 return Err(ConnectionError::ConnectionDropped.into());
             }
-            _ => todo!(),
+            _ => {
+                frame.write_frame_to(writer).await?;
+            }
         }
         Ok(())
     }
@@ -162,6 +164,40 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
                 info!("Sending quit frame");
                 Some(ClientMessage::Disconnect)
             }
+            ":create" => {
+                let mut parts = line.splitn(2, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                info!("Creating room: {}", room);
+                Some(ClientMessage::CreateRoom(room.into()))
+            }
+            ":join" => {
+                let mut parts = line.splitn(2, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                info!("Joining room: {}", room);
+                Some(ClientMessage::Join(room.into()))
+            }
+            ":room" => {
+                let mut parts = line.splitn(3, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                let content = parts.next().unwrap_or_default();
+                info!("Sending room message to {}", room);
+                info!("Message: {}", content);
+                Some(ClientMessage::RoomMessage {
+                    room: room.into(),
+                    content: content.to_string(),
+                })
+            }
+            ":list-rooms" => {
+                info!("Requesting list of rooms");
+                Some(ClientMessage::ListRooms)
+            }
+            ":list-users" => {
+                info!("Requesting list of users");
+                Some(ClientMessage::ListUsers)
+            }
             ":ping" => {
                 info!("Sending ping frame");
                 let frame = ClientMessage::Ping(rand::random());
@@ -188,7 +224,7 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
         }
     } else {
         info!("Sending chat message frame");
-        Some(ClientMessage::ChatMessage(line))
+        Some(ClientMessage::GlobalChatMessage(line))
     }
 }
 

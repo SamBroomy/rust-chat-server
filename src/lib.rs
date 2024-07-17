@@ -6,7 +6,7 @@ mod error;
 mod server;
 
 pub use client::Client;
-pub use common::{ClientMessage, Room, RoomManager, ServerMessage, User};
+pub use common::{ClientMessage, ProcessMessage, RoomManager, RoomName, ServerMessage, UserName};
 pub use connection::{Connection, FrameType};
 pub use error::{Error, Result};
 pub use server::Server;

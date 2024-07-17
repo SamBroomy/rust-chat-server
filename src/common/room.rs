@@ -1,5 +1,5 @@
 use super::{CommonError, Result};
-use crate::{ServerMessage, User};
+use crate::{ServerMessage, UserName};
 
 use bincode::{Decode, Encode};
 use std::collections::HashMap;
@@ -8,23 +8,23 @@ use tokio::sync::broadcast;
 use tracing::error;
 
 #[derive(Debug, Clone, Encode, Decode, Eq, PartialEq, Hash)]
-pub struct Room {
+pub struct RoomName {
     name: String,
 }
 
-impl Display for Room {
+impl Display for RoomName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
 }
 
-impl From<String> for Room {
+impl From<String> for RoomName {
     fn from(name: String) -> Self {
         Self { name }
     }
 }
 
-impl From<&str> for Room {
+impl From<&str> for RoomName {
     fn from(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -34,17 +34,11 @@ impl From<&str> for Room {
 
 #[derive(Debug, Clone, Default)]
 pub struct RoomManager {
-    rooms: HashMap<Room, broadcast::Sender<(User, ServerMessage)>>,
+    rooms: HashMap<RoomName, broadcast::Sender<(UserName, ServerMessage)>>,
 }
 
 impl RoomManager {
-    fn new() -> Self {
-        Self {
-            rooms: HashMap::new(),
-        }
-    }
-
-    pub fn create_room(&mut self, room: impl Into<Room>) -> Result<Room> {
+    pub fn create_room(&mut self, room: impl Into<RoomName>) -> Result<RoomName> {
         let room = room.into();
         if self.rooms.contains_key(&room) {
             // Update key if room exists?
@@ -58,8 +52,8 @@ impl RoomManager {
 
     pub fn update_room(
         &mut self,
-        old_room: impl Into<Room>,
-        new_room: impl Into<Room>,
+        old_room: impl Into<RoomName>,
+        new_room: impl Into<RoomName>,
     ) -> Result<()> {
         let old_room = old_room.into();
         let new_room = new_room.into();
@@ -80,9 +74,9 @@ impl RoomManager {
 
     pub fn join_room(
         &self,
-        room: &Room,
-        user: &User,
-    ) -> Result<broadcast::Receiver<(User, ServerMessage)>> {
+        room: &RoomName,
+        user: &UserName,
+    ) -> Result<broadcast::Receiver<(UserName, ServerMessage)>> {
         self.rooms
             .get(room)
             .map(|tx| {
@@ -100,7 +94,7 @@ impl RoomManager {
             .ok_or(CommonError::RoomNotFound(room.clone()))
     }
 
-    pub fn leave_room(&mut self, room: &Room, user: &User) -> Result<()> {
+    pub fn leave_room(&mut self, room: &RoomName, user: &UserName) -> Result<()> {
         if let Some(tx) = self.rooms.get(room) {
             if let Err(e) = tx.send((user.clone(), ServerMessage::RoomLeft(room.clone()))) {
                 error!("Failed to send room left message: {}", e);
@@ -111,7 +105,23 @@ impl RoomManager {
         }
     }
 
-    pub fn list_rooms(&self) -> Vec<Room> {
+    pub fn list_rooms(&self) -> Vec<RoomName> {
         self.rooms.keys().cloned().collect()
+    }
+
+    pub fn send_message(
+        &self,
+        room: &RoomName,
+        user: &UserName,
+        message: ServerMessage,
+    ) -> Result<()> {
+        if let Some(tx) = self.rooms.get(room) {
+            if let Err(e) = tx.send((user.clone(), message)) {
+                error!("Failed to send message: {}", e);
+            }
+            Ok(())
+        } else {
+            Err(CommonError::RoomNotFound(room.clone()))
+        }
     }
 }

@@ -1,16 +1,18 @@
-use crate::{FrameType, Room, User};
+use crate::{FrameType, RoomName, UserName};
 use bincode::{Decode, Encode};
 use crossterm::style::Stylize;
 use std::fmt::{self, Debug, Display, Formatter};
 
+/// Messages sent by the client to the server
 #[derive(Debug, Clone, Decode, Encode)]
 pub enum ClientMessage {
-    Handshake(User),
-    ChatMessage(String),
-    PrivateMessage { to_user: User, content: String },
+    Handshake(UserName),
+    GlobalChatMessage(String),
+    RoomMessage { room: RoomName, content: String },
+    PrivateMessage { to_user: UserName, content: String },
     Ping(u16),
-    Join(Room),
-    CreateRoom(Room),
+    Join(RoomName),
+    CreateRoom(RoomName),
     Leave,
     ListRooms,
     ListUsers,
@@ -19,15 +21,15 @@ pub enum ClientMessage {
 
 // Builder methods
 impl ClientMessage {
-    pub fn handshake(user: impl Into<User>) -> Self {
+    pub fn handshake(user: impl Into<UserName>) -> Self {
         Self::Handshake(user.into())
     }
 
-    pub fn chat_message(content: impl Into<String>) -> Self {
-        Self::ChatMessage(content.into())
+    pub fn global_chat_message(content: impl Into<String>) -> Self {
+        Self::GlobalChatMessage(content.into())
     }
 
-    pub fn private_message(to_user: impl Into<User>, content: impl Into<String>) -> Self {
+    pub fn private_message(to_user: impl Into<UserName>, content: impl Into<String>) -> Self {
         Self::PrivateMessage {
             to_user: to_user.into(),
             content: content.into(),
@@ -38,11 +40,11 @@ impl ClientMessage {
         Self::Ping(i)
     }
 
-    pub fn join(room: impl Into<Room>) -> Self {
+    pub fn join(room: impl Into<RoomName>) -> Self {
         Self::Join(room.into())
     }
 
-    pub fn create_room(room: impl Into<Room>) -> Self {
+    pub fn create_room(room: impl Into<RoomName>) -> Self {
         Self::CreateRoom(room.into())
     }
 }
@@ -59,7 +61,10 @@ impl Display for ClientMessage {
                     format!("User {} connected!", user.to_string().bold()).green()
                 )
             }
-            ClientMessage::ChatMessage(content) => write!(f, "{}", content),
+            ClientMessage::GlobalChatMessage(content) => write!(f, "{}", content),
+            ClientMessage::RoomMessage { room, content } => {
+                write!(f, "{}: {}", room.to_string().bold(), content)
+            }
             ClientMessage::Ping(i) => write!(f, "Ping: {}", i),
             ClientMessage::Join(room) => write!(f, "Joining room: {}", room),
             ClientMessage::CreateRoom(room) => write!(f, "Creating room: {}", room),

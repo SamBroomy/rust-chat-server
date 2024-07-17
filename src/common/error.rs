@@ -1,11 +1,11 @@
-use crate::Room;
+use crate::RoomName;
 
 pub type Result<T> = std::result::Result<T, CommonError>;
 
 #[derive(Debug)]
 pub enum CommonError {
-    RoomExists(Room),
-    RoomNotFound(Room),
+    RoomExists(RoomName),
+    RoomNotFound(RoomName),
 }
 
 //Error boilerplate
