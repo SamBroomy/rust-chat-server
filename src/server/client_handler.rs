@@ -1,153 +1,142 @@
-use std::net::SocketAddr;
-
-use super::Result;
+use super::{Result, ServerError};
+use crate::common::{
+    messages::{
+        ClientMessage, Handshake, ProcessInternal, ProcessMessage, ServerInternal, ServerMessage,
+        UserInternal, UserMessage,
+    },
+    UserName,
+};
+use crate::connection::{Connection, FrameType};
 
 use crossterm::style::Stylize;
 use tokio::{
     net::TcpStream,
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, oneshot},
 };
-use tracing::{debug, info, warn};
-
-use crate::{
-    common::ProcessResponse, server::ServerError, ClientMessage, Connection, FrameType,
-    ProcessInternal, ProcessMessage, ServerMessage, UserName,
-};
+use tracing::{debug, error, info, warn};
 
 /// Handles the client connection, reading and writing messages to the stream.
 pub struct ClientHandler {
-    socket_addr: SocketAddr,
     user: UserName,
     connection: Connection,
-    server_broadcast_tx: broadcast::Sender<(UserName, ServerMessage)>,
+    client_rx: mpsc::Receiver<ServerMessage>,
     server_command_tx: mpsc::Sender<ProcessMessage>,
-    client_rx: mpsc::Receiver<ProcessMessage>,
+    server_broadcast_rx: broadcast::Receiver<ServerMessage>,
 }
 
 impl ClientHandler {
     pub async fn init(
-        socket_addr: SocketAddr,
         connection: TcpStream,
-        server_broadcast_tx: broadcast::Sender<(UserName, ServerMessage)>,
+        server_broadcast_rx: broadcast::Receiver<ServerMessage>,
         mut server_command_tx: mpsc::Sender<ProcessMessage>,
     ) -> Result<Self> {
         let mut connection = Connection::from_stream(connection);
-        let (client_tx, mut client_rx) = mpsc::channel(16);
 
-        let user = Self::authenticate(
-            &mut connection,
-            &mut server_command_tx,
-            client_tx,
-            &mut client_rx,
-        )
-        .await?;
+        let (user, client_rx) = Self::authenticate(&mut connection, &mut server_command_tx).await?;
 
         Ok(Self {
-            socket_addr,
             user,
             connection,
-            server_broadcast_tx,
-            server_command_tx,
             client_rx,
+            server_command_tx,
+            server_broadcast_rx,
         })
     }
 
+    // TODO: ewww clean this up
     async fn authenticate(
         connection: &mut Connection,
         server_command_tx: &mut mpsc::Sender<ProcessMessage>,
-        client_tx: mpsc::Sender<ProcessMessage>,
-        client_rx: &mut mpsc::Receiver<ProcessMessage>,
-    ) -> Result<UserName> {
+    ) -> Result<(UserName, mpsc::Receiver<ServerMessage>)> {
         debug!("Waiting for handshake frame");
-        let user = match connection.read_frame().await? {
-            ClientMessage::Handshake(user) => user,
-            _ => return Err(ServerError::InvalidHandshake),
+        let user = match connection.read_frame().await {
+            Ok(Handshake(user)) => user,
+            _ => {
+                error!("Expected Handshake frame");
+                return Err(ServerError::InvalidHandshake);
+            }
         };
 
         debug!("Handshake received: {}", user);
 
         debug!("Add user to server");
+        let (oneshot_tx, oneshot_rx) = oneshot::channel();
         // Send the user to the server processor
         server_command_tx
-            .send(ProcessMessage::Internal(ProcessInternal::NewUser(
-                user.clone(),
-                client_tx,
+            .send(ProcessMessage::Internal(ProcessInternal::UserMessage(
+                UserMessage {
+                    from_user: user.clone(),
+                    message: UserInternal::NewUser(oneshot_tx),
+                },
             )))
             .await?;
 
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
-                connection.write_frame(&ServerMessage::Error("Handshake timeout".to_string())).await?;
-                connection.close().await;
-                return Err(ServerError::HandshakeTimeout);
+                error!("Handshake timeout");
+                connection.write_frame(&ServerInternal::ServerMessage("Handshake timeout".to_string())
+                ).await?;
+                Err(ServerError::HandshakeTimeout)
             }
-            Some(process_message) = client_rx.recv() => {
-                match process_message {
-                    ProcessMessage::Internal(ProcessInternal::Response(ProcessResponse::Complete)) => {
-                        debug!("User added to server");
-                    }
-                    _ => return Err(ServerError::InvalidHandshake),
-                }
+            Ok(client_rx) = oneshot_rx => {
+                debug!("User added to server");
+                // Send back a response to the client
+                connection
+                    .write_frame(&ServerInternal::ServerMessage(format!(
+                            "Welcome, {}!",
+                            user.to_string().green()
+                        )))         .await?;
+                debug!("Handshake complete");
+                Ok((user, client_rx))
             }
         }
-
-        // Send back a response to the client
-        connection
-            .write_frame(&ServerMessage::ServerMessage(format!(
-                "Welcome, {}!",
-                user.to_string().green()
-            )))
-            .await?;
-        debug!("Handshake complete");
-        Ok(user)
     }
 
     pub async fn run(&mut self) -> Result<()> {
         let (mut reader, mut writer) = self.connection.split();
 
-        // TODO:: Should be part of the process message.
-        debug!("Sending broadcast message");
-        let welcome_frame = ServerMessage::ServerMessage(format!(
-            "{} joined the server",
-            self.user.username().green()
-        ));
-        // Subscribe to the broadcast channel
-        let mut server_broadcast_rx = self.server_broadcast_tx.subscribe();
-        self.server_broadcast_tx
-            .send((self.user.clone(), welcome_frame))?;
-        debug!("Broadcast message sent");
-
         loop {
             tokio::select! {
-            Ok(frame) = ClientMessage::read_frame_from(&mut reader) => {
-                let message = ProcessMessage::ClientMessage {
-                    from_user: self.user.clone(),
-                    message: frame,
-                };
-                self.server_command_tx.send(message).await?;
-            }
-
-            Ok((send_user ,message)) = server_broadcast_rx.recv() => {
-                if self.user != send_user {
-                    info!("Sending from server_broadcast_rx");
-                    message.write_frame_to(&mut writer).await?;
-                }
-            }
-
-            Some(message) = self.client_rx.recv() => {
-                match message {
-                ProcessMessage::ServerMessage { from_user, message } => {
-                    if self.user == from_user {
-                        debug!("Message from self");
+            frame = ClientMessage::read_frame_from(&mut reader) => {
+                match frame {
+                    Ok(frame) => {
+                        let message = ProcessMessage::ClientMessage {
+                            from_user: self.user.clone(),
+                            message: frame,
+                        };
+                        self.server_command_tx.send(message).await?;}
+                    Err(e) => {
+                        error!("Error reading frame: {}", e);
+                        self.server_command_tx.send(ProcessMessage::Internal(
+                            ProcessInternal::UserMessage(UserMessage {
+                                from_user: self.user.clone(),
+                                message: UserInternal::DisconnectUser,
+                            }),
+                        )).await?;
+                        break;
                     }
-                    info!("Sending from client_rx send user: {} current user: {}", from_user, self.user);
-                    message.write_frame_to(&mut writer).await?;
+            }},
+
+            Ok(ServerMessage { from_user, content }) = self.server_broadcast_rx.recv() => {
+                if self.user != from_user {
+                    info!("Sending from server_broadcast_rx");
+                    content.write_frame_to(&mut writer).await?;
                 }
-                _ => {
-                    warn!("Received message from client_rx that is not a ServerMessage");
-                    break;
+            },
+
+            Some(ServerMessage { from_user, content }) = self.client_rx.recv() => {
+                if self.user == from_user {
+                    debug!("Message from self");
                 }
-            }}}
+                info!("Sending from client_rx send user: {} current user: {}", from_user, self.user);
+                content.write_frame_to(&mut writer).await?;
+            },
+            else => break
+
+
+
+
+            }
         }
 
         warn!(

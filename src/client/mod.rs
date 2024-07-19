@@ -1,7 +1,8 @@
 mod error;
 
-use crate::connection::{ConnectionError, OwnedReader, OwnedWriter};
-use crate::{ClientMessage, Connection, FrameType, ServerMessage, UserName};
+use crate::common::messages::{ClientMessage, Handshake, ServerInternal};
+use crate::common::UserName;
+use crate::connection::{Connection, ConnectionError, FrameType, OwnedReader, OwnedWriter};
 pub use error::ClientError;
 use error::Result;
 
@@ -13,7 +14,7 @@ use std::process::exit;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::ToSocketAddrs;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 pub struct Client {
     user: UserName,
@@ -26,11 +27,12 @@ impl Client {
 
     async fn authenticate(&self, connection: &mut Connection) -> Result<()> {
         connection
-            .write_frame(&ClientMessage::handshake(self.user.clone()))
+            .write_frame(&Handshake(self.user.clone()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip(input_sender), level = "debug")]
     async fn handle_user_input(input_sender: mpsc::Sender<ClientMessage>) {
         let reader = BufReader::new(tokio::io::stdin());
         let mut lines = reader.lines();
@@ -65,49 +67,7 @@ impl Client {
         }
     }
 
-    async fn process_frame(
-        frame: ClientMessage,
-        reader: &mut OwnedReader,
-        writer: &mut OwnedWriter,
-    ) -> Result<()> {
-        match frame {
-            ClientMessage::Ping(nonce) => {
-                info!("Sending ping frame");
-                frame.write_frame_to(writer).await?;
-                let server_frame = ServerMessage::read_frame_from(reader).await?;
-
-                let n = match server_frame {
-                    ServerMessage::Pong(n) => {
-                        println!("{}", server_frame.to_string().yellow());
-                        info!("Received pong frame: {}", n);
-                        n
-                    }
-                    _ => {
-                        error!("Received invalid frame: {:?}", server_frame);
-                        return Ok(());
-                    }
-                };
-
-                assert_eq!(nonce, n);
-                println!("{}", "Ping-pong successful".green());
-            }
-            ClientMessage::Disconnect => {
-                info!("Sending disconnect frame");
-                frame.write_frame_to(writer).await?;
-                return Err(ConnectionError::ConnectionDropped.into());
-            }
-            _ => {
-                frame.write_frame_to(writer).await?;
-            }
-        }
-        Ok(())
-    }
-
-    // if frame.write_frame_to(&mut writer).await.is_err() {
-    //     eprintln!("Failed to send frame");
-    //     break;
-    // }
-
+    #[instrument(skip_all, level = "debug")]
     pub async fn run(self, addr: impl ToSocketAddrs) -> Result<()> {
         let mut connection = Connection::init(addr).await?;
 
@@ -125,7 +85,7 @@ impl Client {
                 Some(frame) = input_receiver.recv() =>{
                     Self::process_frame(frame, &mut reader, &mut writer).await?;
                 }
-                frame = ServerMessage::read_frame_from(&mut reader) => {
+                frame = ServerInternal::read_frame_from(&mut reader) => {
                     match frame {
                         Ok(frame) => {
                             handle_and_print_frame(frame)?
@@ -152,6 +112,43 @@ impl Client {
         }
         Ok(())
     }
+
+    #[instrument(skip(reader, writer), level = "debug")]
+    async fn process_frame(
+        frame: ClientMessage,
+        reader: &mut OwnedReader,
+        writer: &mut OwnedWriter,
+    ) -> Result<()> {
+        match frame {
+            ClientMessage::Ping(nonce) => {
+                info!("Sending ping frame");
+                frame.write_frame_to(writer).await?;
+                let server_frame = ServerInternal::read_frame_from(reader).await?;
+                let n = match server_frame {
+                    ServerInternal::Pong(n) => {
+                        println!("{}", server_frame.to_string().yellow());
+                        info!("Received pong frame: {}", n);
+                        n
+                    }
+                    _ => {
+                        error!("Received invalid frame: {:?}", server_frame);
+                        return Ok(());
+                    }
+                };
+                assert_eq!(nonce, n);
+                println!("{}", "Ping-pong successful".green());
+            }
+            ClientMessage::Disconnect => {
+                info!("Sending disconnect frame");
+                frame.write_frame_to(writer).await?;
+                return Err(ConnectionError::ConnectionDropped.into());
+            }
+            _ => {
+                frame.write_frame_to(writer).await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
@@ -160,46 +157,39 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
 
     if line.starts_with(':') {
         match line.split(' ').next().unwrap().to_lowercase().as_str() {
-            ":quit" => {
-                info!("Sending quit frame");
-                Some(ClientMessage::Disconnect)
-            }
-            ":create" => {
-                let mut parts = line.splitn(2, ' ');
-                parts.next();
-                let room = parts.next().unwrap_or_default();
-                info!("Creating room: {}", room);
-                Some(ClientMessage::CreateRoom(room.into()))
-            }
-            ":join" => {
-                let mut parts = line.splitn(2, ' ');
-                parts.next();
-                let room = parts.next().unwrap_or_default();
-                info!("Joining room: {}", room);
-                Some(ClientMessage::Join(room.into()))
-            }
-            ":room" => {
-                let mut parts = line.splitn(3, ' ');
-                parts.next();
-                let room = parts.next().unwrap_or_default();
-                let content = parts.next().unwrap_or_default();
-                info!("Sending room message to {}", room);
-                info!("Message: {}", content);
-                Some(ClientMessage::RoomMessage {
-                    room: room.into(),
-                    content: content.to_string(),
-                })
-            }
-            ":rooms" => {
-                info!("Requesting list of rooms");
-                Some(ClientMessage::ListRooms)
-            }
-            ":users" => {
-                info!("Requesting list of users");
-                Some(ClientMessage::ListUsers)
-            }
+            ":quit" => Some(ClientMessage::Disconnect),
+            // ":create" => {
+            //     let mut parts = line.splitn(2, ' ');
+            //     parts.next();
+            //     let room = parts.next().unwrap_or_default();
+            //     info!("Creating room: {}", room);
+            //     Some(ClientMessage::CreateRoom(room.into()))
+            // }
+            // ":join" => {
+            //     let mut parts = line.splitn(2, ' ');
+            //     parts.next();
+            //     let room = parts.next().unwrap_or_default();
+            //     info!("Joining room: {}", room);
+            //     Some(ClientMessage::Join(room.into()))
+            // }
+            // ":room" => {
+            //     let mut parts = line.splitn(3, ' ');
+            //     parts.next();
+            //     let room = parts.next().unwrap_or_default();
+            //     let content = parts.next().unwrap_or_default();
+            //     info!("Sending room message to {}", room);
+            //     info!("Message: {}", content);
+            //     Some(ClientMessage::RoomMessage {
+            //         room: room.into(),
+            //         content: content.to_string(),
+            //     })
+            // }
+            // ":rooms" => {
+            //     info!("Requesting list of rooms");
+            //     Some(ClientMessage::ListRooms)
+            // }
+            ":users" => Some(ClientMessage::ListUsers),
             ":ping" => {
-                info!("Sending ping frame");
                 let frame = ClientMessage::Ping(rand::random());
                 println!("{}", frame.to_string().blue());
                 Some(frame)
@@ -218,7 +208,7 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
             }
             _ => {
                 warn!("Invalid command: {}.", line);
-                println!("List of valid commands: <:quit>, <:ping>");
+                println!("List of valid commands: :quit, :ping, :pm, :users");
                 None
             }
         }

@@ -1,17 +1,14 @@
 mod client;
-mod common;
-mod connection;
+pub mod common;
+pub mod connection;
 mod error;
 
 mod server;
 
 pub use client::Client;
-pub use common::{
-    ClientMessage, ProcessInternal, ProcessMessage, RoomManager, RoomName, ServerMessage, UserName,
-};
-pub use connection::{Connection, FrameType};
 pub use error::{Error, Result};
 pub use server::Server;
+
 use tracing::{level_filters::LevelFilter, warn};
 
 /// Initialize the logger and read the .env file to get the address

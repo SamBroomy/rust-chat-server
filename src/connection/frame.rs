@@ -5,7 +5,7 @@ use bincode::{config, Decode, Encode};
 use bytes::BytesMut;
 use std::fmt::{Debug, Display};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::error;
+use tracing::{error, warn};
 
 #[async_trait]
 pub trait FrameType: Debug + Display + Encode + Decode + Send + Sync {
@@ -29,20 +29,28 @@ pub trait FrameType: Debug + Display + Encode + Decode + Send + Sync {
     where
         R: AsyncReadExt + Unpin + Send,
     {
+        // Helper to convert io errors to ConnectionError
+        let convert_err = |e: std::io::Error| match e.kind() {
+            std::io::ErrorKind::UnexpectedEof => {
+                warn!("Connection closed!");
+                ConnectionError::ConnectionClosed
+            }
+            _ => {
+                error!("Connection dropped while reading frame size");
+                ConnectionError::ConnectionDropped
+            }
+        };
         // First, read the length of the frame from the stream. This needs to be 4 bytes long as our frame size definition is u32
         let mut size_buf = [0u8; 4];
-        if reader.read_exact(&mut size_buf).await.is_err() {
-            error!("Connection dropped while reading frame size");
-            return Err(ConnectionError::ConnectionDropped);
-        }
+        reader
+            .read_exact(&mut size_buf)
+            .await
+            .map_err(convert_err)?;
         // Convert the buffer to a u32
         let size = u32::from_le_bytes(size_buf) as usize;
         // Define a buffer with the exact size of the frame, as specified in the first 4 bytes.
         let mut buf = BytesMut::with_capacity(size);
-        if reader.read_buf(&mut buf).await.is_err() {
-            error!("Connection dropped while reading frame");
-            return Err(ConnectionError::ConnectionDropped);
-        }
+        reader.read_buf(&mut buf).await.map_err(convert_err)?;
         // Maybe pointless to freeze, but ensures that the buffer is not modified and we have the underlying bytes.
         let data = buf.freeze();
         // Check if the buffer size is the same as the size of the frame

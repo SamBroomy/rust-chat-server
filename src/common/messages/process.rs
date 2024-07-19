@@ -1,9 +1,9 @@
+use super::{ClientMessage, ServerMessage, UserMessage};
+use crate::common::UserName;
+
 use tokio::sync::mpsc;
 
-use crate::{ClientMessage, ServerMessage, UserName};
-
-/// Messages sent by the client to the server
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProcessMessage {
     ClientMessage {
         from_user: UserName,
@@ -16,15 +16,17 @@ pub enum ProcessMessage {
     Internal(ProcessInternal),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProcessInternal {
-    NewUser(UserName, mpsc::Sender<ProcessMessage>),
+    UserMessage(UserMessage),
+    //RoomMessage(RoomMessage),
     Response(ProcessResponse),
-    JoinRoom(UserName),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProcessResponse {
-    Complete,
-    Error,
+    UserCreated {
+        username: UserName,
+        user_rx: mpsc::Receiver<ServerMessage>,
+    },
 }

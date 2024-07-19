@@ -1,38 +1,44 @@
 use super::Result;
-use crate::{
-    common::ProcessResponse, ClientMessage, ProcessInternal, ProcessMessage, RoomName,
-    ServerMessage, UserName,
+use crate::common::{
+    messages::{
+        ClientMessage, ProcessInternal, ProcessMessage, ServerInternal, ServerMessage,
+        UserInternal, UserMessage,
+    },
+    UserName,
 };
 
-use std::collections::HashMap;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, instrument, warn};
 
 pub struct ServerProcessor {
-    server_command_rx: mpsc::Receiver<ProcessMessage>,
-    server_broadcast_tx: broadcast::Sender<(UserName, ServerMessage)>,
-    users: HashMap<UserName, mpsc::Sender<ProcessMessage>>,
-    rooms: HashMap<RoomName, mpsc::Sender<ProcessInternal>>,
+    server_processor_rx: mpsc::Receiver<ProcessMessage>,
+    user_processor_tx: mpsc::Sender<UserMessage>,
+    server_broadcast_tx: broadcast::Sender<ServerMessage>,
+    //users: HashMap<UserName, mpsc::Sender<ProcessMessage>>,
+    //rooms: HashMap<RoomName, mpsc::Sender<ProcessInternal>>,
 }
 
 impl ServerProcessor {
     pub fn new(
-        server_command_rx: mpsc::Receiver<ProcessMessage>,
-        server_broadcast_tx: broadcast::Sender<(UserName, ServerMessage)>,
+        server_processor_rx: mpsc::Receiver<ProcessMessage>,
+        user_processor_tx: mpsc::Sender<UserMessage>,
+        server_broadcast_tx: broadcast::Sender<ServerMessage>,
     ) -> Self {
         Self {
-            server_command_rx,
+            server_processor_rx,
+            user_processor_tx,
             server_broadcast_tx,
-            users: HashMap::new(),
-            rooms: HashMap::new(),
         }
     }
 
-    #[instrument(skip(self), name = "Processor", level = "debug")]
+    #[instrument(skip_all, level = "debug")]
     pub async fn run(&mut self) -> Result<()> {
-        while let Some(message) = self.server_command_rx.recv().await {
+        // Start a new task to handle room messages
+
+        while let Some(message) = self.server_processor_rx.recv().await {
             match message {
                 ProcessMessage::Internal(process_internal) => {
+                    // Start new task
                     self.handle_internal_message(process_internal).await?;
                 }
                 ProcessMessage::ClientMessage { from_user, message } => {
@@ -48,116 +54,84 @@ impl ServerProcessor {
         Ok(())
     }
 
-    #[instrument(skip(self), name = "Internal", level = "debug")]
+    #[instrument(skip_all, level = "debug")]
     async fn handle_internal_message(&mut self, process_internal: ProcessInternal) -> Result<()> {
         match process_internal {
-            ProcessInternal::NewUser(user, tx) => {
-                info!("New user: {}", user);
-                self.users.insert(user.clone(), tx.clone());
-                tx.send(ProcessMessage::Internal(ProcessInternal::Response(
-                    ProcessResponse::Complete,
-                )))
-                .await?;
+            ProcessInternal::UserMessage(user_message) => {
+                warn!("Received user message: {:?}", user_message);
+                self.user_processor_tx.send(user_message).await?;
             }
             ProcessInternal::Response(response) => {
                 warn!("Received response: {:?}", response)
             }
-            _ => warn!("Unhandled internal message: {:?}", process_internal),
         }
         Ok(())
     }
 
-    #[instrument(skip(self), name = "Client", level = "debug")]
+    #[instrument(skip_all, level = "debug")]
     async fn handle_client_message(
         &mut self,
         from_user: UserName,
         message: ClientMessage,
     ) -> Result<()> {
-        info!("Received client message from {}", from_user);
+        info!("Received client message from {}: {:?}", from_user, message);
 
         match message {
             ClientMessage::Disconnect => {
                 // TODO: Remove from any room
-                if let Some(client_tx) = self.users.remove(&from_user) {
-                    self.server_broadcast_tx.send((
-                        from_user.clone(),
-                        ServerMessage::server_message(format!("{} disconnected", from_user)),
-                    ))?;
-                }
+                self.handle_internal_message(ProcessInternal::UserMessage(UserMessage {
+                    from_user,
+                    message: UserInternal::DisconnectUser,
+                }))
+                .await?;
             }
             ClientMessage::GlobalChatMessage(content) => {
-                let message = ServerMessage::ChatMessage {
-                    from: from_user.clone(),
-                    content,
-                };
-                self.server_broadcast_tx
-                    .send((from_user.clone(), message))?;
+                self.server_broadcast_tx.send(ServerMessage {
+                    from_user: from_user.clone(),
+                    content: ServerInternal::GlobalChatMessage { from_user, content },
+                })?;
             }
-            ClientMessage::PrivateMessage { to_user, content } => match self.users.get(&to_user) {
-                Some(tx) => {
-                    let message = ServerMessage::PrivateMessage {
-                        from: from_user.clone(),
-                        content,
-                    };
-                    tx.send(ProcessMessage::ServerMessage {
-                        from_user: from_user.clone(),
-                        message,
-                    })
-                    .await?;
-                }
-                None => {
-                    let message = ServerMessage::Error(format!("User not found: {}", to_user));
-                    if let Some(tx) = self.users.get(&from_user) {
-                        tx.send(ProcessMessage::ServerMessage {
-                            from_user: from_user.clone(),
-                            message,
-                        })
-                        .await?;
-                    }
-                }
-            },
+            ClientMessage::PrivateMessage { to_user, content } => {
+                self.handle_internal_message(ProcessInternal::UserMessage(UserMessage {
+                    from_user,
+                    message: UserInternal::PrivateMessage { to_user, content },
+                }))
+                .await?;
+            }
             ClientMessage::Ping(nonce) => {
-                let message = ServerMessage::Pong(nonce);
-                if let Some(tx) = self.users.get(&from_user) {
-                    tx.send(ProcessMessage::ServerMessage {
-                        from_user: from_user.clone(),
-                        message,
-                    })
-                    .await?;
-                }
+                self.handle_internal_message(ProcessInternal::UserMessage(UserMessage {
+                    from_user,
+                    message: UserInternal::Ping(nonce),
+                }))
+                .await?;
             }
             ClientMessage::ListUsers => {
-                let users = self.users.keys().cloned().collect();
-                let message = ServerMessage::UserList { users };
-                if let Some(tx) = self.users.get(&from_user) {
-                    tx.send(ProcessMessage::ServerMessage {
-                        from_user: from_user.clone(),
-                        message,
-                    })
-                    .await?;
-                }
-            }
-            ClientMessage::ListRooms => {
-                let rooms = self.rooms.keys().cloned().collect();
-                let message = ServerMessage::RoomList { rooms };
-                if let Some(tx) = self.users.get(&from_user) {
-                    tx.send(ProcessMessage::ServerMessage {
-                        from_user: from_user.clone(),
-                        message,
-                    })
-                    .await?;
-                }
-            }
-            ClientMessage::Join(room) => {
-                todo!("Join room");
-            }
-            ClientMessage::CreateRoom(room) => {
-                todo!("Create room");
-            }
-            ClientMessage::RoomMessage { room, content } => {
-                todo!()
-            }
-            _ => warn!("Unhandled client message: {:?}", message),
+                self.handle_internal_message(ProcessInternal::UserMessage(UserMessage {
+                    from_user,
+                    message: UserInternal::ListUsers,
+                }))
+                .await?;
+            } // ClientMessage::ListRooms => {
+              //     let rooms = self.rooms.keys().cloned().collect();
+              //     let message = ServerMessage::RoomList { rooms };
+              //     if let Some(tx) = self.users.get(&from_user) {
+              //         tx.send(ProcessMessage::ServerMessage {
+              //             from_user: from_user.clone(),
+              //             message,
+              //         })
+              //         .await?;
+              //     }
+              // }
+              // ClientMessage::Join(room) => {
+              //     todo!("Join room");
+              // }
+              // ClientMessage::CreateRoom(room) => {
+              //     todo!("Create room");
+              // }
+              // ClientMessage::RoomMessage { room, content } => {
+              //     todo!()
+              // }
+              // _ => warn!("Unhandled client message: {:?}", message),
         }
 
         Ok(())
@@ -169,8 +143,8 @@ impl ServerProcessor {
         from_user: UserName,
         message: ServerMessage,
     ) -> Result<()> {
-        info!("Received server message from {}", from_user);
-        self.server_broadcast_tx.send((from_user, message))?;
+        info!("Received server message from {}: {:?}", from_user, message);
+        self.server_broadcast_tx.send(message)?;
         Ok(())
     }
 }

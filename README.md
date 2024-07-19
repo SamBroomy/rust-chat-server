@@ -1,44 +1,62 @@
-# rust-chat-server
+# Rust Chat Server
 
-Understanding rust, tokio, threads, channels & async better by implementing a chat-server from scratch.
+Understanding rust, tokio, threads, channels & async better by implementing a multi-client chat server from scratch using Rust and Tokio.
 
-## Current features
+## Current Features
 
-- Global Server chat
-- Chat rooms (soon)
-- 'Private'/Direct Messaging
+- Multi-client server chat
+- Channels-based architecture for shared state management (avoiding `Arc<Mutex>`)
+- Global chat messaging
+- Private/Direct Messaging
 - Global Notifications
-- 'lose' authentication (want to intergrate some form of encryption, maybe even encrypted messages). 
+- User authentication (basic implementation)
+- Task-based architecture:
+  - Client connection handling (send and receive)
+  - Core message processing
+  - User management (new users, user channels, user removal)
+- Ping functionality for testing connection
 
-Todo: Move the request processing to the server thread rather than (how it currently is implemented) by the connection handler.
+## Project Structure
 
-## Will update the below soon!!!
+The project is organized into several modules:
 
-## How to run
+- `connection`: Handles the low-level connection details and frame encoding/decoding
+- `server`: Implements the server-side logic, including client handling and message processing
+- `client`: Implements the client-side logic and user interface
+- `common`: Contains shared data structures and message types
 
-Run each of the following commands in a separate terminal window.
+## To-Do
 
-`cargo run` or `just run` - Run the server
+- [x] Send and receive frames (encode and decode data over the network as bytes)
+- [x] Implement basic echo server
+- [x] Create chat server handling multiple clients
+- [x] Implement broadcasting messages to all connected clients
+- [x] Implement private/direct messaging
+- [ ] Better handling of user input
+- [ ] Some terminal UI for the client
+- [ ] Add support for multiple chat rooms
+- [ ] Implement more robust authentication and user management
+- [ ] Implement end-to-end encryption for messages
+- [ ] Save chat history to a database
 
-`just client` - Connect to the server (run this command several times in different terminal windows to simulate multiple clients)
+## How to Run
 
-## Branch 1 - Echo server
+1. Start the server:
 
-Currently implemented and heavily commented is an echo server.
+    `cargo run` or `just run`
 
-Will slowly remove the comments but for now, it's a good reference for understanding the code.
+2. Connect a client:
 
-## Branch 2 - Chat server
+    `cargo run --bin client` or `just client`
 
-Now implemented a chat server that will be able to handle multiple clients, and broadcast messages to all connected clients.
+    > Run this command in multiple terminal windows to simulate multiple clients.
 
-## Branch 3 - Send & Receive Frames
+## Available Client Commands
 
-Its starting to get a bit messy but will clean things up later. Now what we have done is to send and receive frames. Essentially, deserializing some data (in this case an Enum) to bytes, sending the bytes from the client to the server and then serializing the bytes back to the original data.
-
-run the server with `cargo run --bin rust-chat-server`
-
-run the client `cargo run --bin client`
+- `:quit` - Disconnect from the server
+- `:ping` - Send a ping to the server
+- `:pm <username> <message>` - Send a private message to a specific user
+- `:users` - List all connected users
 
 ## References
 

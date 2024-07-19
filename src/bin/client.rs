@@ -16,7 +16,7 @@ fn get_username() -> Result<String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let address = init(None);
+    let address = init(Level::INFO);
     let username = get_username()?;
 
     let client = Client::new(username).await;

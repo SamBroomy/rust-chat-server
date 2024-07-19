@@ -1,6 +1,6 @@
-use crate::RoomName;
-
 pub type Result<T> = std::result::Result<T, CommonError>;
+
+use super::RoomName;
 
 #[derive(Debug)]
 pub enum CommonError {
