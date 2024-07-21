@@ -74,22 +74,33 @@ impl ClientHandler {
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
                 error!("Handshake timeout");
-                connection.write_frame(&ServerInternal::ServerMessage("Handshake timeout".to_string())
-                ).await?;
-                Err(ServerError::HandshakeTimeout)
             }
-            Ok(client_rx) = oneshot_rx => {
-                debug!("User added to server");
-                // Send back a response to the client
-                connection
-                    .write_frame(&ServerInternal::ServerMessage(format!(
+            Ok(client_rx_result) = oneshot_rx => {
+                match client_rx_result {
+                    Ok(client_rx) => {
+
+                        debug!("User added to server");
+                        // Send back a response to the client
+                        connection
+                            .write_frame(&ServerInternal::ServerMessage(format!(
                             "Welcome, {}!",
                             user.to_string().green()
-                        )))         .await?;
-                debug!("Handshake complete");
-                Ok((user, client_rx))
+                        ))).await?;
+                        debug!("Handshake complete");
+                        return Ok((user, client_rx))
+                    }
+                    Err(e) => {
+                        error!("Handshake failed: {}", e);
+                    }
+                }
             }
         }
+        connection
+            .write_frame(&ServerInternal::ServerMessage(
+                "Handshake timeout".to_string(),
+            ))
+            .await?;
+        Err(ServerError::HandshakeTimeout)
     }
 
     pub async fn run(&mut self) -> Result<()> {

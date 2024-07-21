@@ -1,4 +1,4 @@
-use crate::common::{messages::ServerMessage, UserName};
+use crate::common::{messages::ServerMessage, Result, UserName};
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -10,7 +10,7 @@ pub struct UserMessage {
 
 #[derive(Debug)]
 pub enum UserInternal {
-    NewUser(oneshot::Sender<mpsc::Receiver<ServerMessage>>),
+    NewUser(oneshot::Sender<Result<mpsc::Receiver<ServerMessage>>>),
     PrivateMessage { to_user: UserName, content: String },
     DisconnectUser,
     Ping(u16),

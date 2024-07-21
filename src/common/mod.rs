@@ -7,4 +7,4 @@ pub use error::CommonError;
 use error::Result;
 
 pub use room::{RoomManager, RoomName};
-pub use user::UserName;
+pub use user::{User, UserManager, UserName};

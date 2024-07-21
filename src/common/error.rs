@@ -1,9 +1,11 @@
 pub type Result<T> = std::result::Result<T, CommonError>;
 
-use super::RoomName;
+use super::{RoomName, UserName};
 
 #[derive(Debug)]
 pub enum CommonError {
+    UserExists(UserName),
+    UserNotExists(UserName),
     RoomExists(RoomName),
     RoomNotFound(RoomName),
 }

@@ -1,19 +1,18 @@
 use super::Result;
 use crossterm::style::Stylize;
-use std::collections::HashMap;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 use crate::common::{
     messages::{ProcessMessage, ServerInternal, ServerMessage, UserInternal, UserMessage},
-    UserName,
+    UserManager, UserName,
 };
 
 pub struct UserProcessor {
     user_processor_rx: mpsc::Receiver<UserMessage>,
     server_command_tx: mpsc::Sender<ProcessMessage>,
     server_broadcast_tx: broadcast::Sender<ServerMessage>,
-    users: HashMap<UserName, mpsc::Sender<ServerMessage>>,
+    user_manager: UserManager,
 }
 
 impl UserProcessor {
@@ -26,7 +25,7 @@ impl UserProcessor {
             user_processor_rx,
             server_command_tx,
             server_broadcast_tx,
-            users: HashMap::new(),
+            user_manager: UserManager::default(),
         }
     }
 
@@ -36,8 +35,7 @@ impl UserProcessor {
             match message {
                 UserInternal::NewUser(sender) => {
                     info!("New user: {}", from_user);
-                    let (user_tx, user_rx) = mpsc::channel(32);
-                    self.users.insert(from_user.clone(), user_tx.clone());
+                    let user_rx = self.user_manager.add_new_user(from_user.clone());
                     sender.send(user_rx).unwrap();
                     self.server_broadcast_tx.send(ServerMessage {
                         from_user: from_user.clone(),
@@ -49,19 +47,27 @@ impl UserProcessor {
                 }
                 UserInternal::DisconnectUser => {
                     info!("Disconnecting user: {}", from_user);
-                    self.users.remove(&from_user);
-                    self.server_broadcast_tx.send(ServerMessage {
-                        from_user: from_user.clone(),
-                        content: ServerInternal::ServerMessage(format!(
-                            "{} disconnected",
-                            from_user
-                        )),
-                    })?;
+                    match self.user_manager.remove_user(&from_user) {
+                        Ok(_) => {
+                            self.server_broadcast_tx.send(ServerMessage {
+                                from_user: from_user.clone(),
+                                content: ServerInternal::ServerMessage(format!(
+                                    "{} disconnected",
+                                    from_user
+                                )),
+                            })?;
+                        }
+                        Err(e) => {
+                            warn!("Unable to disconnect user: {}", e);
+                        }
+                    }
                 }
                 UserInternal::PrivateMessage { to_user, content } => {
                     info!("Private message from: {} to: {}", from_user, to_user);
-                    match self.users.get(&to_user) {
-                        Some(to_user_tx) => {
+
+                    match self.user_manager.get_user(&to_user) {
+                        Ok(user) => {
+                            let to_user_tx = user.user_tx();
                             if to_user == from_user {
                                 to_user_tx
                                     .send(ServerMessage {
@@ -84,11 +90,14 @@ impl UserProcessor {
                                     .await?;
                             }
                         }
-                        None => {
-                            if let Some(from_user_tx) = self.users.get(&from_user) {
-                                from_user_tx
+                        Err(e) => {
+                            warn!("User does not exist: {e}");
+                            if let Ok(from_user) = self.user_manager.get_user(&from_user) {
+                                let from_user_name = from_user.user_name().clone();
+                                from_user
+                                    .user_tx()
                                     .send(ServerMessage {
-                                        from_user,
+                                        from_user: from_user_name,
                                         content: ServerInternal::Error(format!(
                                             "User not found: {}",
                                             to_user
@@ -101,8 +110,8 @@ impl UserProcessor {
                 }
                 UserInternal::Ping(nonce) => {
                     info!("Ping from: {}", from_user);
-                    if let Some(user_tx) = self.users.get(&from_user) {
-                        user_tx
+                    if let Ok(user) = self.user_manager.get_user(&from_user) {
+                        user.user_tx()
                             .send(ServerMessage {
                                 from_user,
                                 content: ServerInternal::Pong(nonce),
@@ -112,9 +121,10 @@ impl UserProcessor {
                 }
                 UserInternal::ListUsers => {
                     info!("List users from: {}", from_user);
-                    let users: Vec<UserName> = self.users.keys().cloned().collect();
-                    if let Some(user_tx) = self.users.get(&from_user) {
+                    let users: Vec<UserName> = self.user_manager.list_users();
+                    if let Ok(user_tx) = self.user_manager.get_user(&from_user) {
                         user_tx
+                            .user_tx()
                             .send(ServerMessage {
                                 from_user,
                                 content: ServerInternal::UserList { users },

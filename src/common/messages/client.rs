@@ -1,6 +1,6 @@
 use crate::connection::FrameType;
 
-use crate::common::{RoomName, UserName};
+use crate::common::UserName;
 
 use bincode::{Decode, Encode};
 use std::fmt::{self, Debug, Display, Formatter};
