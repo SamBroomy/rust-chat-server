@@ -1,4 +1,4 @@
-use crate::common::UserName;
+use crate::common::{RoomName, UserName};
 use crate::connection::FrameType;
 
 use bincode::{Decode, Encode};
@@ -34,20 +34,15 @@ pub enum ServerInternal {
     },
     Error(String),
     Pong(u16),
-    // RoomMessage {
-    //     room: RoomName,
-    //     from: UserName,
-    //     content: String,
-    // },
-    // RoomList {
-    //     rooms: Vec<RoomName>,
-    // },
-    // RoomJoined {
-    //     room: RoomName,
-    //     user: UserName,
-    // },
-    // RoomCreated(RoomName),
-    // RoomLeft(RoomName),
+    RoomMessage {
+        room: RoomName,
+        from: UserName,
+        content: String,
+    },
+    RoomUsers {
+        room: RoomName,
+        users: Vec<UserName>,
+    },
 }
 
 impl FrameType for ServerInternal {}
@@ -75,19 +70,6 @@ impl Display for ServerInternal {
                     content.as_str().green()
                 )
             }
-            // ServerMessage::RoomMessage {
-            //     room,
-            //     from,
-            //     content,
-            // } => {
-            //     write!(
-            //         f,
-            //         "{} {:<10}: {}",
-            //         format!("[{}]", room).to_string().cyan(),
-            //         from.to_string().yellow(),
-            //         content
-            //     )
-            // }
             ServerInternal::PrivateMessage { from_user, content } => {
                 write!(
                     f,
@@ -106,14 +88,6 @@ impl Display for ServerInternal {
                 )
             }
             ServerInternal::Pong(i) => write!(f, "{}", format!("Pong: {:}", i).yellow()),
-            // ServerMessage::RoomList { rooms } => {
-            //     let rooms = rooms.iter().map(ToString::to_string).collect::<Vec<_>>();
-            //     if rooms.is_empty() {
-            //         write!(f, "{}", "[No Rooms created]".cyan())
-            //     } else {
-            //         write!(f, "{}, {}", "[Rooms]".cyan(), rooms.join(", ").cyan())
-            //     }
-            // }
             ServerInternal::UserList { users } => {
                 let users = users.iter().map(ToString::to_string).collect::<Vec<_>>();
                 if users.is_empty() {
@@ -122,20 +96,30 @@ impl Display for ServerInternal {
                     write!(f, "{} {}", "[Users]".yellow(), users.join(", "))
                 }
             }
-            // ServerMessage::RoomJoined { room, user } => {
-            //     write!(
-            //         f,
-            //         "User {} joined room: {}",
-            //         user.to_string().yellow(),
-            //         room.to_string().cyan()
-            //     )
-            // }
-            // ServerMessage::RoomCreated(room) => {
-            //     write!(f, "Created room: {}", room.to_string().cyan())
-            // }
-            // ServerMessage::RoomLeft(room) => write!(f, "Left room: {}", room.to_string().cyan()),
             ServerInternal::UserJoined(user) => {
                 write!(f, "User joined: {}", user.to_string().on_yellow())
+            }
+            ServerInternal::RoomMessage {
+                room,
+                from,
+                content,
+            } => {
+                write!(
+                    f,
+                    "{} {:<10}: {}",
+                    format!("[{}]", room).to_string().cyan(),
+                    from.to_string().yellow(),
+                    content
+                )
+            }
+            ServerInternal::RoomUsers { room, users } => {
+                let users = users.iter().map(ToString::to_string).collect::<Vec<_>>();
+                write!(
+                    f,
+                    "{}: {}",
+                    format!("[{}]", room).to_string().cyan(),
+                    users.join(", ")
+                )
             }
         }
     }

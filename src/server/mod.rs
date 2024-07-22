@@ -1,6 +1,7 @@
 mod client_handler;
 mod error;
 mod processor;
+mod room_handler;
 mod user_handler;
 
 use crate::common::messages::ServerMessage;
@@ -8,6 +9,7 @@ use client_handler::ClientHandler;
 use error::Result;
 pub use error::ServerError;
 use processor::ServerProcessor;
+use room_handler::RoomProcessor;
 use user_handler::UserProcessor;
 
 use tokio::net::{TcpListener, ToSocketAddrs};
@@ -38,12 +40,10 @@ impl Server {
         // Start a new task to handle users
         let (user_processor_tx, user_processor_rx) = mpsc::channel(32);
         let (server_processor_tx, server_processor_rx) = mpsc::channel(64);
+        let (room_processor_tx, room_processor_rx) = mpsc::channel(32);
 
-        let user_processor = UserProcessor::new(
-            user_processor_rx,
-            server_processor_tx.clone(),
-            self.server_broadcast_tx.clone(),
-        );
+        let user_processor =
+            UserProcessor::new(user_processor_rx, self.server_broadcast_tx.clone());
 
         tokio::spawn(async move {
             if let Err(e) = user_processor.run().await {
@@ -51,9 +51,22 @@ impl Server {
             }
         });
 
+        let room_handler = RoomProcessor::new(
+            room_processor_rx,
+            user_processor_tx.clone(),
+            self.server_broadcast_tx.clone(),
+        );
+
+        tokio::spawn(async move {
+            if let Err(e) = room_handler.run().await {
+                error!("Error running room processor: {}", e);
+            }
+        });
+
         let mut server_processor = ServerProcessor::new(
             server_processor_rx,
             user_processor_tx,
+            room_processor_tx,
             self.server_broadcast_tx.clone(),
         );
 

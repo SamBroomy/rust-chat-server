@@ -206,9 +206,55 @@ fn parse_user_input(input: impl Into<String>) -> Option<ClientMessage> {
                     content: content.to_string(),
                 })
             }
+            ":cr" => {
+                let mut parts = line.splitn(2, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                info!("Creating room: {}", room);
+                Some(ClientMessage::CreateRoom(room.into()))
+            }
+            ":jr" => {
+                let mut parts = line.splitn(2, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                info!("Joining room: {}", room);
+                Some(ClientMessage::JoinRoom(room.into()))
+            }
+            ":lr" => {
+                let mut parts = line.splitn(2, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                info!("Leaving room: {}", room);
+                Some(ClientMessage::LeaveRoom(room.into()))
+            }
+            ":lrs" => {
+                info!("Requesting list of rooms");
+                Some(ClientMessage::ListRooms)
+            }
+            ":lru" => {
+                let mut parts = line.splitn(2, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                info!("Requesting list of users in room: {}", room);
+                Some(ClientMessage::ListRoomUsers(room.into()))
+            }
+            ":rm" => {
+                let mut parts = line.splitn(3, ' ');
+                parts.next();
+                let room = parts.next().unwrap_or_default();
+                let content = parts.next().unwrap_or_default();
+                info!("Sending room message to {}", room);
+                info!("Message: {}", content);
+                Some(ClientMessage::RoomMessage {
+                    room: room.into(),
+                    content: content.to_string(),
+                })
+            }
             _ => {
                 warn!("Invalid command: {}.", line);
-                println!("List of valid commands: :quit, :ping, :pm, :users");
+                println!(
+                    "List of valid commands: :quit, :ping, :pm, :cr, :jr, :lr, :lrs, :lru, :rm"
+                );
                 None
             }
         }
@@ -235,30 +281,8 @@ impl TryFrom<&str> for Commands {
     }
 }
 
-// impl From<Commands> for Frame {
-//     fn from(command: Commands) -> Self {
-//         match command {
-//             Commands::Quit => Frame::Disconnect,
-//             Commands::Ping => Frame::Ping(rand::random()),
-//         }
-//     }
-// }
-
 fn handle_and_print_frame<F: FrameType>(frame: F) -> Result<()> {
     println!("{}", frame.to_string().red());
-    // execute!(
-    //     std::io::stdout(),
-    //     SetForegroundColor(Color::Blue),
-    //     SetBackgroundColor(Color::Red),
-    //     Print(frame.to_string()),
-    //     ResetColor
-    // )?;
-
-    // match frame {
-    //     todo!()
-    //         error!("Received invalid frame: {:?}", frame);
-    //     }
-    // }
 
     Ok(())
 }

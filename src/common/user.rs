@@ -79,9 +79,30 @@ impl From<&str> for UserName {
 //     }
 // }
 
+#[derive(Debug, Clone)]
 pub struct User {
     user_name: UserName,
     user_tx: mpsc::Sender<ServerMessage>,
+}
+
+impl Eq for User {}
+
+impl PartialEq<User> for User {
+    fn eq(&self, other: &User) -> bool {
+        self.user_name() == other.user_name()
+    }
+}
+
+impl Hash for User {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.user_name().hash(state);
+    }
+}
+
+impl Display for User {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.user_name)
+    }
 }
 
 impl User {

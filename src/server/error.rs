@@ -1,4 +1,4 @@
-use crate::common::messages::{ProcessMessage, ServerMessage, UserMessage};
+use crate::common::messages::{ProcessMessage, RoomMessage, ServerMessage, UserMessage};
 use crate::common::UserName;
 
 pub type Result<T> = std::result::Result<T, ServerError>;
@@ -10,6 +10,8 @@ pub enum ServerError {
     #[from]
     Io(std::io::Error),
     #[from]
+    GetUserBroadcastFailed(tokio::sync::oneshot::error::RecvError),
+    #[from]
     ServerBroadcastFailed(tokio::sync::broadcast::error::SendError<ServerMessage>),
     #[from]
     ClientBroadcastFailed(tokio::sync::mpsc::error::SendError<ProcessMessage>),
@@ -17,6 +19,8 @@ pub enum ServerError {
     OutputBroadcastFailed(tokio::sync::mpsc::error::SendError<ServerMessage>),
     #[from]
     UserBroadcastFailed(tokio::sync::mpsc::error::SendError<UserMessage>),
+    #[from]
+    RoomBroadcastFailed(tokio::sync::mpsc::error::SendError<RoomMessage>),
     #[from]
     Common(crate::common::CommonError),
     InvalidHandshake,

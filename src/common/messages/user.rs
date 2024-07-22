@@ -1,4 +1,4 @@
-use crate::common::{messages::ServerMessage, Result, UserName};
+use crate::common::{messages::ServerMessage, Result, User, UserName};
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -14,5 +14,6 @@ pub enum UserInternal {
     PrivateMessage { to_user: UserName, content: String },
     DisconnectUser,
     Ping(u16),
+    GetUser(oneshot::Sender<Result<User>>),
     ListUsers,
 }

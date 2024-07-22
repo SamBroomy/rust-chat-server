@@ -142,11 +142,7 @@ impl ClientHandler {
                 info!("Sending from client_rx send user: {} current user: {}", from_user, self.user);
                 content.write_frame_to(&mut writer).await?;
             },
-            else => break
-
-
-
-
+                else => break
             }
         }
 

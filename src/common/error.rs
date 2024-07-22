@@ -1,13 +1,24 @@
 pub type Result<T> = std::result::Result<T, CommonError>;
 
-use super::{RoomName, UserName};
+use super::{
+    messages::{ServerMessage, UserMessage},
+    RoomName, User, UserName,
+};
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::From)]
 pub enum CommonError {
     UserExists(UserName),
+    UserInRoom(User),
     UserNotExists(UserName),
+    UserNotInRoom(User),
     RoomExists(RoomName),
+    NoUsersInRoom,
+    RoomMessageNotSent,
     RoomNotFound(RoomName),
+    #[from]
+    SendUserProcess(tokio::sync::mpsc::error::SendError<UserMessage>),
+    #[from]
+    SendUserProcessBroadcast(tokio::sync::mpsc::error::SendError<ServerMessage>),
 }
 
 //Error boilerplate

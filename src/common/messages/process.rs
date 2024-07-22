@@ -1,4 +1,4 @@
-use super::{ClientMessage, ServerMessage, UserMessage};
+use super::{ClientMessage, RoomMessage, ServerMessage, UserMessage};
 use crate::common::UserName;
 
 use tokio::sync::mpsc;
@@ -19,7 +19,7 @@ pub enum ProcessMessage {
 #[derive(Debug)]
 pub enum ProcessInternal {
     UserMessage(UserMessage),
-    //RoomMessage(RoomMessage),
+    RoomMessage(RoomMessage),
     Response(ProcessResponse),
 }
 
